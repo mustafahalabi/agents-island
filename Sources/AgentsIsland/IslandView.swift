@@ -70,6 +70,7 @@ struct IslandView: View {
         .onHover(perform: handleHover)
         .animation(spring, value: monitor.agents)
         .onReceive(NotificationCenter.default.publisher(for: .agentCompleted), perform: handleCompletion)
+        .onReceive(NotificationCenter.default.publisher(for: .approvalNeeded), perform: handleApprovalNeeded)
         .onReceive(NotificationCenter.default.publisher(for: .islandExpand)) { _ in
             guard !expanded else { return }
             withAnimation(expandSpring) { expanded = true }
@@ -118,6 +119,27 @@ struct IslandView: View {
         let token = autoRevealToken
         installOutsideClickMonitor()
         DispatchQueue.main.asyncAfter(deadline: .now() + max(1, autoRevealDwell)) {
+            guard token == autoRevealToken, autoRevealActive else { return }
+            if !mouseInside, !switcher.active { collapseNow() } else { endAutoReveal() }
+        }
+    }
+
+    /// Approvals always pull the panel forward (independent of the
+    /// task-complete toggle) — unless you're already in that terminal.
+    private func handleApprovalNeeded(_ note: Notification) {
+        guard !expanded else { return }
+        if smartSuppression,
+           let pid = note.object as? Int32,
+           let agent = monitor.agents.first(where: { $0.id == pid }),
+           TerminalBridge.isFrontmost(appNamed: agent.terminalApp) {
+            return
+        }
+        withAnimation(expandSpring) { expanded = true }
+        autoRevealActive = true
+        autoRevealToken += 1
+        let token = autoRevealToken
+        installOutsideClickMonitor()
+        DispatchQueue.main.asyncAfter(deadline: .now() + max(10, autoRevealDwell)) {
             guard token == autoRevealToken, autoRevealActive else { return }
             if !mouseInside, !switcher.active { collapseNow() } else { endAutoReveal() }
         }
@@ -406,9 +428,12 @@ private struct SessionCard: View {
     @AppStorage(Pref.showGitBranch) private var showGitBranch = true
     @AppStorage(Pref.showSubagents) private var showSubagents = true
     @AppStorage(Pref.contentFontSize) private var fontSize = 11
+    @ObservedObject private var approvals = ApprovalCenter.shared
     @State private var hovered = false
 
     private var fs: CGFloat { CGFloat(fontSize) }
+    private var approval: ApprovalCenter.Approval? { approvals.pending[agent.id] }
+    private var approvalColor: Color { AgentStatus.waiting.color }
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
@@ -465,6 +490,12 @@ private struct SessionCard: View {
                     SubagentsSection(subagents: agent.subagents, compact: true)
                         .padding(.top, 3)
                 }
+
+                // Pending permission request → answer from the island
+                if approval != nil {
+                    approvalBar
+                        .padding(.top, 3)
+                }
             }
         }
         .padding(.vertical, 10)
@@ -476,14 +507,48 @@ private struct SessionCard: View {
         .overlay(
             RoundedRectangle(cornerRadius: 15, style: .continuous)
                 .strokeBorder(
-                    selected ? Color(red: 0.45, green: 0.62, blue: 1.0).opacity(0.8) : .white.opacity(0.06),
-                    lineWidth: selected ? 1.5 : 1
+                    approval != nil ? approvalColor.opacity(0.55)
+                        : selected ? Color(red: 0.45, green: 0.62, blue: 1.0).opacity(0.8)
+                        : .white.opacity(0.06),
+                    lineWidth: selected || approval != nil ? 1.5 : 1
                 )
         )
         .onHover { inside in
             hovered = inside
             if inside { NSCursor.pointingHand.push() } else { NSCursor.pop() }
         }
+    }
+
+    /// "Needs approval: Bash" + Approve / Always / Deny, answering the
+    /// terminal prompt (1 / 2 / 3) without leaving the island.
+    private var approvalBar: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(spacing: 5) {
+                Image(systemName: "lock.shield.fill")
+                    .font(.system(size: 10))
+                    .foregroundStyle(approvalColor)
+                Text(approval?.toolName.map { "Needs approval: \($0)" } ?? "Needs your approval")
+                    .font(.system(size: fs, weight: .semibold))
+                    .foregroundStyle(approvalColor)
+                    .lineLimit(1)
+            }
+            HStack(spacing: 6) {
+                ApprovalButton(label: "Approve", tint: AgentStatus.working.color) {
+                    ApprovalCenter.shared.respond(pid: agent.id, action: .approve)
+                }
+                ApprovalButton(label: "Always Allow", tint: .white.opacity(0.75)) {
+                    ApprovalCenter.shared.respond(pid: agent.id, action: .alwaysAllow)
+                }
+                ApprovalButton(label: "Deny", tint: Color(red: 1.0, green: 0.45, blue: 0.45)) {
+                    ApprovalCenter.shared.respond(pid: agent.id, action: .deny)
+                }
+                Spacer(minLength: 0)
+            }
+        }
+        .padding(8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 10, style: .continuous)
+            .fill(approvalColor.opacity(0.10)))
     }
 
     /// Chips drop least-important-first when the row runs out of width, so
@@ -543,6 +608,28 @@ private struct SessionCard: View {
                 .lineLimit(1)
                 .fixedSize()
         }
+    }
+}
+
+private struct ApprovalButton: View {
+    let label: String
+    let tint: Color
+    let action: () -> Void
+    @State private var hovered = false
+
+    var body: some View {
+        Button(action: action) {
+            Text(label)
+                .font(.system(size: 10, weight: .semibold, design: .rounded))
+                .foregroundStyle(tint)
+                .padding(.horizontal, 9)
+                .padding(.vertical, 4)
+                .background(Capsule().fill(tint.opacity(hovered ? 0.22 : 0.12)))
+                .overlay(Capsule().strokeBorder(tint.opacity(0.35), lineWidth: 1))
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovered = $0 }
     }
 }
 

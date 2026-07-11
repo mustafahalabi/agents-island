@@ -5,13 +5,14 @@ import UniformTypeIdentifiers
 // MARK: - Panes
 
 enum SettingsPane: String, CaseIterable, Identifiable {
-    case general, notifications, display, sound, agents, shortcuts, about
+    case general, integrations, notifications, display, sound, agents, shortcuts, about
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
         case .general: return "General"
+        case .integrations: return "Integrations"
         case .notifications: return "Notifications"
         case .display: return "Display"
         case .sound: return "Sound"
@@ -24,6 +25,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
     var icon: String {
         switch self {
         case .general: return "gearshape.fill"
+        case .integrations: return "puzzlepiece.extension.fill"
         case .notifications: return "bell.badge.fill"
         case .display: return "textformat.size"
         case .sound: return "speaker.wave.2.fill"
@@ -36,6 +38,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
     var tileColor: Color {
         switch self {
         case .general: return Color(white: 0.45)
+        case .integrations: return Color(red: 0.30, green: 0.65, blue: 0.90)
         case .notifications: return Color(red: 0.94, green: 0.35, blue: 0.32)
         case .display: return Color(red: 0.45, green: 0.45, blue: 0.95)
         case .sound: return Color(red: 0.25, green: 0.75, blue: 0.40)
@@ -46,7 +49,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
     }
 
     /// Panes shown below the "Advanced" separator in the sidebar.
-    static let main: [SettingsPane] = [.general, .notifications, .display, .sound, .agents]
+    static let main: [SettingsPane] = [.general, .integrations, .notifications, .display, .sound, .agents]
     static let advanced: [SettingsPane] = [.shortcuts, .about]
 }
 
@@ -104,6 +107,7 @@ struct SettingsView: View {
 
                 switch pane {
                 case .general: GeneralPane()
+                case .integrations: IntegrationsPane()
                 case .notifications: NotificationsPane()
                 case .display: DisplayPane()
                 case .sound: SoundPane()
@@ -357,6 +361,39 @@ private struct GeneralPane: View {
                     .labelsHidden()
                     .fixedSize()
                 }
+            }
+        }
+    }
+}
+
+// MARK: - Integrations
+
+private struct IntegrationsPane: View {
+    @State private var installed = ApprovalCenter.hookInstalled
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 22) {
+            SSection(title: "Claude Code",
+                     footer: installed
+                     ? "When Claude asks for permission, the island pops up with Approve / Always Allow / Deny — the buttons answer the terminal prompt for you (1 / 2 / 3). Global shortcuts activate too while a request is pending."
+                     : "Installs a Notification hook into ~/.claude/settings.json (a backup is written first). The hook never blocks Claude — it just tells the island when permission is needed. Restart running Claude sessions to pick it up.") {
+                SRow(title: "Permission approvals from the island",
+                     subtitle: installed ? "Hook installed" : "Hook not installed") {
+                    Button(installed ? "Remove" : "Install") {
+                        if installed {
+                            ApprovalCenter.uninstallHook()
+                        } else {
+                            ApprovalCenter.installHook()
+                        }
+                        installed = ApprovalCenter.hookInstalled
+                    }
+                }
+            }
+
+            SSection(title: "Terminal control", footer: "Approvals in iTerm and tmux are answered precisely via the session's tty. Terminal.app and other terminals are activated first and the key is synthesized — macOS will ask once for Accessibility permission.") {
+                SRow(title: "iTerm / tmux", subtitle: "Exact tty targeting, no extra permissions") { EmptyView() }
+                SDiv()
+                SRow(title: "Terminal.app & others", subtitle: "System Events keystroke (Accessibility)") { EmptyView() }
             }
         }
     }
@@ -666,6 +703,12 @@ private struct SoundPane: View {
                                key: Pref.soundAcknowledge, customSounds: customSounds)
             }
 
+            SSection(title: "Interactions") {
+                SoundPickerRow(title: "Approval Needed",
+                               subtitle: "Claude asks for permission (needs the hook — see Integrations)",
+                               key: Pref.soundApprovalNeeded, customSounds: customSounds)
+            }
+
             SSection(title: "My Sounds", footer: "Imported sounds appear in every picker above.") {
                 if customSounds.isEmpty {
                     SRow(title: "No imported sounds yet.") { EmptyView() }
@@ -890,8 +933,7 @@ private struct ShortcutsPane: View {
                 }
             }
 
-            SSection(title: "Panel Shortcuts",
-                     footer: "Active while the switcher is open. Approve / Deny shortcuts arrive together with permission actions on the roadmap.") {
+            SSection(title: "Panel Shortcuts", footer: "Navigation is active while the switcher is open.") {
                 SRow(title: "Navigate Sessions") {
                     HStack(spacing: 4) {
                         KeyCap(label: "↑")
@@ -906,6 +948,15 @@ private struct ShortcutsPane: View {
                         KeyCap(label: "T")
                     }
                 }
+            }
+
+            SSection(title: "Approval Shortcuts",
+                     footer: "Global, but only registered while a permission request is pending — they never shadow other apps' shortcuts in normal use. Needs the Claude Code hook (Integrations).") {
+                SRow(title: "Approve") { KeyCap(label: "\(mod)Y") }
+                SDiv()
+                SRow(title: "Always Allow") { KeyCap(label: "\(mod)A") }
+                SDiv()
+                SRow(title: "Deny") { KeyCap(label: "\(mod)N") }
             }
         }
         .onChange(of: enabled) { _, _ in HotKeyCenter.shared.update() }

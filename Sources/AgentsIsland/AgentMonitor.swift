@@ -55,6 +55,7 @@ final class AgentMonitor: ObservableObject {
                 }
                 self.hasScannedOnce = true
                 self.agents = found
+                ApprovalCenter.shared.sync(agents: found)
             }
         }
     }

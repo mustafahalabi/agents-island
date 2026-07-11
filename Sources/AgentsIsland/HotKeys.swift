@@ -12,8 +12,13 @@ final class HotKeyCenter {
 
     private static let forwardId: UInt32 = 1
     private static let backwardId: UInt32 = 2
+    private static let approveId: UInt32 = 3
+    private static let alwaysAllowId: UInt32 = 4
+    private static let denyId: UInt32 = 5
 
-    /// (Re-)register hotkeys from current preferences.
+    /// (Re-)register hotkeys from current preferences. Approval keys
+    /// (mod+Y/A/N) only exist while a permission request is pending, so they
+    /// never shadow other apps' shortcuts in normal use.
     func update() {
         unregisterAll()
         let defaults = UserDefaults.standard
@@ -24,6 +29,11 @@ final class HotKeyCenter {
         register(keyCode: UInt32(kVK_ANSI_G), modifiers: modifiers, id: Self.forwardId)
         if defaults.bool(forKey: Pref.reverseSwitcher) {
             register(keyCode: UInt32(kVK_ANSI_G), modifiers: modifiers | UInt32(shiftKey), id: Self.backwardId)
+        }
+        if ApprovalCenter.shared.hasPending {
+            register(keyCode: UInt32(kVK_ANSI_Y), modifiers: modifiers, id: Self.approveId)
+            register(keyCode: UInt32(kVK_ANSI_A), modifiers: modifiers, id: Self.alwaysAllowId)
+            register(keyCode: UInt32(kVK_ANSI_N), modifiers: modifiers, id: Self.denyId)
         }
     }
 
@@ -55,7 +65,18 @@ final class HotKeyCenter {
                               EventParamType(typeEventHotKeyID), nil,
                               MemoryLayout<EventHotKeyID>.size, nil, &hotKeyId)
             DispatchQueue.main.async {
-                SwitcherState.shared.advance(by: hotKeyId.id == HotKeyCenter.backwardId ? -1 : 1)
+                switch hotKeyId.id {
+                case HotKeyCenter.approveId:
+                    ApprovalCenter.shared.respondToNewest(action: .approve)
+                case HotKeyCenter.alwaysAllowId:
+                    ApprovalCenter.shared.respondToNewest(action: .alwaysAllow)
+                case HotKeyCenter.denyId:
+                    ApprovalCenter.shared.respondToNewest(action: .deny)
+                case HotKeyCenter.backwardId:
+                    SwitcherState.shared.advance(by: -1)
+                default:
+                    SwitcherState.shared.advance(by: 1)
+                }
             }
             return noErr
         }, 1, &eventType, nil, &handler)

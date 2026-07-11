@@ -46,6 +46,7 @@ enum Pref {
     static let soundSessionStart = "soundSessionStart"  // sound name or "Off"
     static let soundTaskComplete = "soundTaskComplete"
     static let soundAcknowledge = "soundAcknowledge"    // you replied, agent got to work
+    static let soundApprovalNeeded = "soundApprovalNeeded" // permission request pending
     static let quietHoursEnabled = "quietHoursEnabled"
     static let quietHoursStart = "quietHoursStart"      // minutes from midnight
     static let quietHoursEnd = "quietHoursEnd"
@@ -101,6 +102,7 @@ enum Pref {
             soundSessionStart: "Off",
             soundTaskComplete: "Glass",
             soundAcknowledge: "Off",
+            soundApprovalNeeded: "Ping",
             quietHoursEnabled: false,
             quietHoursStart: 22 * 60,
             quietHoursEnd: 8 * 60,

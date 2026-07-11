@@ -22,6 +22,9 @@ final class SoundEngine {
         center.addObserver(forName: .agentAcknowledged, object: nil, queue: .main) { [weak self] _ in
             self?.playEvent(Pref.soundAcknowledge)
         }
+        center.addObserver(forName: .approvalNeeded, object: nil, queue: .main) { [weak self] _ in
+            self?.playEvent(Pref.soundApprovalNeeded)
+        }
     }
 
     /// Play the sound configured for a preference key, honoring master

@@ -110,6 +110,46 @@ enum TerminalBridge {
         }
     }
 
+    /// Send a single raw key (no Enter) to the agent's session — used to
+    /// answer Claude Code permission prompts ("1"/"2"/"3").
+    @discardableResult
+    static func sendKey(_ key: String, to agent: AgentSession) -> Bool {
+        let dev = agent.tty.map { "/dev/\($0)" }
+
+        switch agent.terminalApp {
+        case "tmux":
+            guard let tmux = tmuxPath, let pane = tmuxPane(tty: dev) else { return false }
+            _ = run(tmux, ["send-keys", "-t", pane, "-l", key])
+            return true
+        case "iTerm":
+            guard let dev else { return false }
+            return osascript("""
+            tell application "iTerm"
+                repeat with w in windows
+                    repeat with t in tabs of w
+                        repeat with s in sessions of t
+                            if tty of s is "\(dev)" then
+                                tell s to write text "\(escaped(key))" newline NO
+                                return
+                            end if
+                        end repeat
+                    end repeat
+                end repeat
+            end tell
+            """)
+        case .some:
+            // Terminal.app & friends have no raw-key API; activate the right
+            // window first, then synthesize the keystroke (needs Accessibility).
+            jump(to: agent)
+            return osascript("""
+            delay 0.3
+            tell application "System Events" to keystroke "\(escaped(key))"
+            """)
+        case nil:
+            return false
+        }
+    }
+
     /// Is the given terminal/editor app currently frontmost? Names are fuzzy —
     /// our detector says "iTerm"/"VS Code" while macOS reports "iTerm2"/"Code".
     static func isFrontmost(appNamed name: String?) -> Bool {
