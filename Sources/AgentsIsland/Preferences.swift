@@ -35,6 +35,7 @@ enum Pref {
     static let showTasks = "showTasks"                  // task checklist on session cards
     static let showModel = "showModel"                  // AI model chip on cards
     static let showGitBranch = "showGitBranch"          // git branch chip on cards
+    static let showSubagents = "showSubagents"          // fan-out Task subagents on cards
     static let maxVisibleSessions = "maxVisibleSessions"
     static let notchWidthOffset = "notchWidthOffset"    // pt added to the detected notch width
     static let notchHeightOffset = "notchHeightOffset"  // pt added to the detected notch height
@@ -90,6 +91,7 @@ enum Pref {
             showTasks: true,
             showModel: true,
             showGitBranch: true,
+            showSubagents: true,
             maxVisibleSessions: 6,
             notchWidthOffset: 0.0,
             notchHeightOffset: 0.0,

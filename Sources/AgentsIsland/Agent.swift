@@ -105,6 +105,12 @@ struct Todo: Equatable {
     let status: String // "pending" | "in_progress" | "completed"
 }
 
+struct Subagent: Equatable {
+    let description: String
+    let type: String?   // e.g. "Explore", "general-purpose"
+    let done: Bool
+}
+
 struct AgentSession: Identifiable, Equatable {
     let id: Int32 // pid
     let kind: AgentKind
@@ -124,6 +130,8 @@ struct AgentSession: Identifiable, Equatable {
     var transcriptPath: String?
     var model: String?         // raw model id from the transcript, e.g. "claude-opus-4-8"
     var gitBranch: String?     // current branch of the session's cwd
+    var subagents: [Subagent] = []
+    var plan: String?          // markdown from the last ExitPlanMode call
 
     /// "claude-opus-4-8" → "Opus 4.8", "claude-sonnet-5" → "Sonnet 5",
     /// "gpt-5-codex" → "GPT 5 Codex", "o4-mini" → "O4 Mini".

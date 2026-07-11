@@ -396,6 +396,7 @@ private struct DisplayPane: View {
     @AppStorage(Pref.showTasks) private var showTasks = true
     @AppStorage(Pref.showModel) private var showModel = true
     @AppStorage(Pref.showGitBranch) private var showGitBranch = true
+    @AppStorage(Pref.showSubagents) private var showSubagents = true
     @AppStorage(Pref.maxVisibleSessions) private var maxVisibleSessions = 6
     @AppStorage(Pref.notchWidthOffset) private var notchWidthOffset = 0.0
     @AppStorage(Pref.notchHeightOffset) private var notchHeightOffset = 0.0
@@ -465,6 +466,11 @@ private struct DisplayPane: View {
                 SDiv()
                 SRow(title: "Show git branch") {
                     Toggle("", isOn: $showGitBranch).toggleStyle(.switch).labelsHidden()
+                }
+                SDiv()
+                SRow(title: "Show subagents",
+                     subtitle: "Fan-out Task subagents while they run. Keeps the panel clean when off.") {
+                    Toggle("", isOn: $showSubagents).toggleStyle(.switch).labelsHidden()
                 }
                 SDiv()
                 SRow(title: "Show terminal app chip") {

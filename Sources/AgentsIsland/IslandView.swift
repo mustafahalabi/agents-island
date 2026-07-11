@@ -404,6 +404,7 @@ private struct SessionCard: View {
     @AppStorage(Pref.showTasks) private var showTasks = true
     @AppStorage(Pref.showModel) private var showModel = true
     @AppStorage(Pref.showGitBranch) private var showGitBranch = true
+    @AppStorage(Pref.showSubagents) private var showSubagents = true
     @AppStorage(Pref.contentFontSize) private var fontSize = 11
     @State private var hovered = false
 
@@ -456,6 +457,12 @@ private struct SessionCard: View {
                 // Task checklist from the agent's todo list
                 if showTasks, !agent.todos.isEmpty {
                     TasksSection(todos: agent.todos, compact: true)
+                        .padding(.top, 3)
+                }
+
+                // Fan-out subagents (only interesting while any is running)
+                if showSubagents, agent.subagents.contains(where: { !$0.done }) {
+                    SubagentsSection(subagents: agent.subagents, compact: true)
                         .padding(.top, 3)
                 }
             }
@@ -570,6 +577,8 @@ private struct SessionDetail: View {
     let onBack: () -> Void
 
     @State private var messages: [ChatMessage] = []
+    @State private var replyText = ""
+    @State private var justSent = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -622,8 +631,16 @@ private struct SessionDetail: View {
                 transcript
             }
 
+            if let plan = agent.plan {
+                PlanSection(markdown: plan)
+            }
+
             if !agent.todos.isEmpty {
                 TasksSection(todos: agent.todos)
+            }
+
+            if !agent.subagents.isEmpty {
+                SubagentsSection(subagents: agent.subagents)
             }
 
             if agent.status == .working, let activity = agent.activity {
@@ -636,9 +653,52 @@ private struct SessionDetail: View {
                 .padding(.horizontal, 6)
             }
 
+            if agent.terminalApp != nil {
+                replyField
+            }
         }
         .onAppear(perform: load)
         .onChange(of: agent) { _, _ in load() }
+    }
+
+    /// Quick-reply straight into the agent's terminal session.
+    private var replyField: some View {
+        HStack(spacing: 8) {
+            TextField("Reply to \(agent.kind.displayName)…", text: $replyText)
+                .textFieldStyle(.plain)
+                .font(.system(size: 12))
+                .foregroundStyle(.white)
+                .onSubmit(sendReply)
+            Button(action: sendReply) {
+                Image(systemName: justSent ? "checkmark.circle.fill" : "arrow.up.circle.fill")
+                    .font(.system(size: 18))
+                    .foregroundStyle(justSent ? AgentStatus.working.color
+                        : replyText.isEmpty ? .white.opacity(0.3) : .white.opacity(0.9))
+            }
+            .buttonStyle(.plain)
+            .disabled(replyText.isEmpty)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .fill(.white.opacity(0.06)))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .strokeBorder(.white.opacity(0.08), lineWidth: 1))
+    }
+
+    private func sendReply() {
+        let text = replyText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        let target = agent
+        replyText = ""
+        DispatchQueue.global(qos: .userInitiated).async {
+            let ok = TerminalBridge.send(text: text, to: target)
+            DispatchQueue.main.async {
+                guard ok else { return }
+                justSent = true
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { justSent = false }
+            }
+        }
     }
 
     private var transcript: some View {
@@ -780,6 +840,146 @@ private struct TasksSection: View {
             Image(systemName: "square")
                 .font(.system(size: 10))
                 .foregroundStyle(.white.opacity(0.5))
+        }
+    }
+}
+
+/// Fan-out Task subagents: running ones with a pulsing dot, recent finishes dimmed.
+private struct SubagentsSection: View {
+    let subagents: [Subagent]
+    var compact = false
+
+    private var running: Int { subagents.filter { !$0.done }.count }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 4) {
+                Image(systemName: "arrow.triangle.branch")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.6))
+                Text("Agents")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.8))
+                Text("(\(running) running)")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.white.opacity(0.4))
+            }
+
+            ForEach(Array(subagents.prefix(compact ? 3 : 6).enumerated()), id: \.offset) { _, sub in
+                HStack(spacing: 7) {
+                    if sub.done {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 9))
+                            .foregroundStyle(.white.opacity(0.3))
+                    } else {
+                        PulsingDot(color: AgentStatus.working.color)
+                    }
+                    Text(sub.description)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.white.opacity(sub.done ? 0.35 : 0.85))
+                        .lineLimit(1)
+                    if let type = sub.type {
+                        Text(type)
+                            .font(.system(size: 9, weight: .semibold, design: .rounded))
+                            .foregroundStyle(.white.opacity(0.4))
+                    }
+                    Spacer(minLength: 0)
+                    if sub.done {
+                        Text("Done")
+                            .font(.system(size: 9.5, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.35))
+                    }
+                }
+            }
+        }
+        .padding(compact ? 8 : 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: compact ? 10 : 12, style: .continuous)
+            .fill(.white.opacity(compact ? 0.05 : 0.04)))
+    }
+}
+
+/// The plan Claude presented via ExitPlanMode, lightly Markdown-rendered.
+private struct PlanSection: View {
+    let markdown: String
+    @State private var collapsed = true
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Button {
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) { collapsed.toggle() }
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "list.clipboard")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(.white.opacity(0.6))
+                    Text("Plan")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(.white.opacity(0.8))
+                    Spacer()
+                    Image(systemName: collapsed ? "chevron.down" : "chevron.up")
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundStyle(.white.opacity(0.4))
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if !collapsed {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 4) {
+                        ForEach(Array(renderedLines.enumerated()), id: \.offset) { _, line in
+                            line
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(maxHeight: 180)
+            } else {
+                Text(firstLinePreview)
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(.white.opacity(0.45))
+                    .lineLimit(1)
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .fill(.white.opacity(0.04)))
+    }
+
+    private var firstLinePreview: String {
+        markdown.split(separator: "\n").first(where: { !$0.isEmpty })
+            .map { $0.trimmingCharacters(in: CharacterSet(charactersIn: "# ")) } ?? ""
+    }
+
+    /// Line-based Markdown: headers bold, bullets indented, inline styles
+    /// via AttributedString. Good enough for plan text.
+    private var renderedLines: [Text] {
+        markdown.split(separator: "\n", omittingEmptySubsequences: false).prefix(80).map { raw in
+            let line = String(raw)
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            func inline(_ s: String, size: CGFloat, weight: Font.Weight = .regular,
+                        opacity: Double = 0.75) -> Text {
+                let attributed = (try? AttributedString(
+                    markdown: s, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
+                    ?? AttributedString(s)
+                return Text(attributed)
+                    .font(.system(size: size, weight: weight))
+                    .foregroundStyle(.white.opacity(opacity))
+            }
+            if trimmed.hasPrefix("### ") {
+                return inline(String(trimmed.dropFirst(4)), size: 11, weight: .semibold, opacity: 0.9)
+            } else if trimmed.hasPrefix("## ") {
+                return inline(String(trimmed.dropFirst(3)), size: 11.5, weight: .bold, opacity: 0.92)
+            } else if trimmed.hasPrefix("# ") {
+                return inline(String(trimmed.dropFirst(2)), size: 12, weight: .bold, opacity: 0.95)
+            } else if trimmed.hasPrefix("- ") || trimmed.hasPrefix("* ") {
+                return Text("  •  ").font(.system(size: 10.5)).foregroundStyle(.white.opacity(0.5))
+                    + inline(String(trimmed.dropFirst(2)), size: 10.5)
+            } else {
+                return inline(line, size: 10.5)
+            }
         }
     }
 }

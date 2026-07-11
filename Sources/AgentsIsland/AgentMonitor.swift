@@ -127,6 +127,8 @@ final class AgentMonitor: ObservableObject {
                 session.title = info.title
                 session.lastPrompt = info.lastPrompt
                 session.model = info.model
+                session.subagents = info.subagents
+                session.plan = info.plan
                 // Task store is the current system; TodoWrite in the
                 // transcript is the legacy fallback.
                 let storeTasks = ClaudeSessions.tasks(sessionId: meta.sessionId)

@@ -20,6 +20,8 @@ enum ClaudeSessions {
         var activity: String?
         var model: String?
         var todos: [Todo] = []
+        var subagents: [Subagent] = []
+        var plan: String?      // markdown from the last ExitPlanMode call
     }
 
     private static let home = FileManager.default.homeDirectoryForCurrentUser.path
@@ -98,6 +100,7 @@ enum ClaudeSessions {
         var info = TranscriptInfo()
         var pendingTools: [(id: String, description: String)] = []
         var resolvedToolIds = Set<String>()
+        var taskCalls: [(id: String, description: String, type: String?)] = []
 
         for obj in tailEntries(path: path, bytes: 192 * 1024) {
             switch obj["type"] as? String {
@@ -122,6 +125,15 @@ enum ClaudeSessions {
                                 return Todo(content: content, status: todo["status"] as? String ?? "pending")
                             }
                         }
+                        if name == "Task" || name == "Agent" {
+                            let description = (input["description"] as? String)
+                                ?? (input["prompt"] as? String).map { String($0.prefix(60)) }
+                                ?? "Subagent"
+                            taskCalls.append((id, description, input["subagent_type"] as? String))
+                        }
+                        if name == "ExitPlanMode", let plan = input["plan"] as? String, !plan.isEmpty {
+                            info.plan = plan
+                        }
                     }
                 }
             case "user":
@@ -139,6 +151,12 @@ enum ClaudeSessions {
         }
 
         info.activity = pendingTools.last(where: { !resolvedToolIds.contains($0.id) })?.description
+
+        // Running subagents first, then the most recent finished ones.
+        let running = taskCalls.filter { !resolvedToolIds.contains($0.id) }
+        let finished = taskCalls.filter { resolvedToolIds.contains($0.id) }.suffix(2)
+        info.subagents = (running.map { Subagent(description: $0.description, type: $0.type, done: false) }
+            + finished.map { Subagent(description: $0.description, type: $0.type, done: true) })
 
         if let mtime {
             cacheLock.lock()
