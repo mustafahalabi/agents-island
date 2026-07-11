@@ -195,7 +195,11 @@ final class AgentMonitor: ObservableObject {
                 session.model = GeminiSessions.defaultModel()
             }
 
-            session.gitBranch = gitBranch(cwd: session.cwd)
+            // Branch reads touch project folders (often in ~/Documents, which
+            // is TCC-protected) — skip them entirely when the chip is off.
+            if UserDefaults.standard.bool(forKey: Pref.showGitBranch) {
+                session.gitBranch = gitBranch(cwd: session.cwd)
+            }
             sessions.append(session)
         }
 

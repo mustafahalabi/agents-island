@@ -42,6 +42,12 @@ cat > "$APP/Contents/Info.plist" <<EOF
     <key>CFBundleIconFile</key><string>AppIcon</string>
     <key>NSAppleEventsUsageDescription</key>
     <string>Agents Island sends your replies to agent sessions in your terminal and jumps to their tabs.</string>
+    <key>NSDocumentsFolderUsageDescription</key>
+    <string>Agents Island reads each session's .git/HEAD to show the current branch on its card.</string>
+    <key>NSDesktopFolderUsageDescription</key>
+    <string>Agents Island reads each session's .git/HEAD to show the current branch on its card.</string>
+    <key>NSDownloadsFolderUsageDescription</key>
+    <string>Agents Island reads each session's .git/HEAD to show the current branch on its card.</string>
     <key>NSHighResolutionCapable</key><true/>
 </dict>
 </plist>
