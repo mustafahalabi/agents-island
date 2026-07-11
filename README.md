@@ -53,7 +53,15 @@ Native SwiftUI. No Electron, no dock icon, no cloud — everything is read from 
 
 Requires **macOS 14+** (Apple Silicon or Intel).
 
-**One line** (builds locally with the Xcode Command Line Tools you already have — no Gatekeeper warnings):
+**Homebrew:**
+
+```sh
+brew install --cask mustafahalabi/tap/agents-island
+```
+
+(Homebrew ≥ 4.6 asks you to trust third-party taps once: `brew trust mustafahalabi/tap`.)
+
+**One line, no Homebrew** (builds locally with the Xcode Command Line Tools you already have — no Gatekeeper warnings):
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/mustafahalabi/agents-island/main/install.sh | bash
