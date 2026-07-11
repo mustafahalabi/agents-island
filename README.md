@@ -51,7 +51,17 @@ Native SwiftUI. No Electron, no dock icon, no cloud — everything is read from 
 
 ## Install
 
-Requires **macOS 14+** (Apple Silicon or Intel) and Xcode command-line tools.
+Requires **macOS 14+** (Apple Silicon or Intel).
+
+**One line** (builds locally with the Xcode Command Line Tools you already have — no Gatekeeper warnings):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/mustafahalabi/agents-island/main/install.sh | bash
+```
+
+**Prebuilt** — grab `AgentsIsland.zip` from the [latest release](https://github.com/mustafahalabi/agents-island/releases/latest), drag to /Applications, and **right-click → Open** the first time (releases aren't notarized yet).
+
+**From a checkout:**
 
 ```sh
 git clone https://github.com/mustafahalabi/agents-island.git
@@ -59,7 +69,7 @@ cd agents-island
 ./make-app.sh --install   # builds, installs to /Applications, launches
 ```
 
-Without `--install` the app builds and runs from `dist/AgentsIsland.app`. The app registers itself as a login item on first launch (toggleable in Settings).
+The app registers itself as a login item on first launch (toggleable in Settings). Uninstall by quitting from the menu bar and deleting `/Applications/AgentsIsland.app`.
 
 To enable **permission approvals**, open Settings → Integrations → Install, then restart any running Claude Code sessions.
 
