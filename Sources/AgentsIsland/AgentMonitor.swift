@@ -199,6 +199,8 @@ final class AgentMonitor: ObservableObject {
             sessions.append(session)
         }
 
+        sessions.append(contentsOf: RemoteMonitor.shared.currentSessions())
+
         return sessions.sorted {
             (sortRank($0.status), $0.kind.rawValue, $0.id) < (sortRank($1.status), $1.kind.rawValue, $1.id)
         }
@@ -213,7 +215,7 @@ final class AgentMonitor: ObservableObject {
     }
 
     /// Model from the command line: `-m x`, `--model x`, or `--model=x`.
-    private static func argsModel(_ args: String) -> String? {
+    static func argsModel(_ args: String) -> String? {
         let tokens = args.split(separator: " ").map(String.init)
         for (index, token) in tokens.enumerated() {
             if token == "-m" || token == "--model",
@@ -227,7 +229,7 @@ final class AgentMonitor: ObservableObject {
 
     /// Recognize an agent from its full command line. Matches the executable
     /// basename directly, or the script argument when run via an interpreter.
-    private static func detect(args: String) -> AgentKind? {
+    static func detect(args: String) -> AgentKind? {
         let tokens = args.split(separator: " ")
         guard let first = tokens.first else { return nil }
         let exe = basename(String(first))
@@ -317,7 +319,7 @@ final class AgentMonitor: ObservableObject {
     }
 
     /// ps etime is [[dd-]hh:]mm:ss — condense to "3m", "1h 12m", "2d 4h".
-    private static func prettyElapsed(_ etime: String) -> String {
+    static func prettyElapsed(_ etime: String) -> String {
         var days = 0
         var rest = etime
         if let dash = rest.firstIndex(of: "-") {

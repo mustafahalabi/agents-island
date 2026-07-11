@@ -5,7 +5,7 @@ import UniformTypeIdentifiers
 // MARK: - Panes
 
 enum SettingsPane: String, CaseIterable, Identifiable {
-    case general, integrations, notifications, display, sound, usage, agents, shortcuts, about
+    case general, integrations, notifications, display, sound, usage, agents, shortcuts, sshRemote = "ssh", about
 
     var id: String { rawValue }
 
@@ -19,6 +19,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
         case .usage: return "Usage"
         case .agents: return "Agents"
         case .shortcuts: return "Shortcuts"
+        case .sshRemote: return "SSH Remote"
         case .about: return "About"
         }
     }
@@ -33,6 +34,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
         case .usage: return "gauge.with.needle.fill"
         case .agents: return "sparkles"
         case .shortcuts: return "keyboard.fill"
+        case .sshRemote: return "globe"
         case .about: return "info.circle.fill"
         }
     }
@@ -47,13 +49,14 @@ enum SettingsPane: String, CaseIterable, Identifiable {
         case .usage: return Color(red: 0.90, green: 0.30, blue: 0.45)
         case .agents: return Color(red: 0.95, green: 0.60, blue: 0.20)
         case .shortcuts: return Color(red: 0.70, green: 0.40, blue: 0.90)
+        case .sshRemote: return Color(red: 0.35, green: 0.75, blue: 0.75)
         case .about: return Color(red: 0.30, green: 0.60, blue: 0.95)
         }
     }
 
     /// Panes shown below the "Advanced" separator in the sidebar.
     static let main: [SettingsPane] = [.general, .integrations, .notifications, .display, .sound, .usage, .agents]
-    static let advanced: [SettingsPane] = [.shortcuts, .about]
+    static let advanced: [SettingsPane] = [.shortcuts, .sshRemote, .about]
 }
 
 struct SettingsView: View {
@@ -117,6 +120,7 @@ struct SettingsView: View {
                 case .usage: UsagePane()
                 case .agents: AgentsPane()
                 case .shortcuts: ShortcutsPane()
+                case .sshRemote: SSHRemotePane()
                 case .about: AboutPane()
                 }
             }
@@ -1053,9 +1057,84 @@ private struct ShortcutsPane: View {
     }
 }
 
+// MARK: - SSH Remote
+
+private struct SSHRemotePane: View {
+    @State private var hosts = RemoteMonitor.hosts()
+    @State private var newHost = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 22) {
+            SSection(title: "Remote hosts",
+                     footer: "Hosts are scanned every 10 seconds over ssh with BatchMode (key authentication only — set up your ~/.ssh/config first; nothing will ever prompt for a password). Remote sessions appear with a host chip; status is CPU-based, working directories come from /proc on Linux.") {
+                if hosts.isEmpty {
+                    SRow(title: "No remote hosts yet.") { EmptyView() }
+                }
+                ForEach(hosts) { host in
+                    SRow(title: host.host, subtitle: statusText(host)) {
+                        HStack(spacing: 10) {
+                            Toggle("", isOn: binding(for: host)).toggleStyle(.switch).labelsHidden()
+                            Button {
+                                hosts.removeAll { $0.host == host.host }
+                                RemoteMonitor.saveHosts(hosts)
+                            } label: {
+                                Image(systemName: "trash").font(.system(size: 12))
+                                    .foregroundStyle(.secondary)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    SDiv()
+                }
+                SRow(title: "") {
+                    HStack(spacing: 8) {
+                        TextField("user@server or ssh alias", text: $newHost)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(width: 220)
+                            .onSubmit(add)
+                        Button("Add", action: add)
+                            .disabled(newHost.trimmingCharacters(in: .whitespaces).isEmpty)
+                    }
+                }
+            }
+        }
+    }
+
+    private func statusText(_ host: RemoteMonitor.Host) -> String {
+        guard host.enabled else { return "Disabled" }
+        switch RemoteMonitor.shared.isReachable(host.host) {
+        case .some(true): return "Connected"
+        case .some(false): return "Unreachable (check ssh key auth)"
+        case .none: return "Waiting for first scan…"
+        }
+    }
+
+    private func add() {
+        let trimmed = newHost.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty, !hosts.contains(where: { $0.host == trimmed }) else { return }
+        hosts.append(RemoteMonitor.Host(host: trimmed, enabled: true))
+        newHost = ""
+        RemoteMonitor.saveHosts(hosts)
+    }
+
+    private func binding(for host: RemoteMonitor.Host) -> Binding<Bool> {
+        Binding(
+            get: { hosts.first { $0.host == host.host }?.enabled ?? false },
+            set: { enabled in
+                if let index = hosts.firstIndex(where: { $0.host == host.host }) {
+                    hosts[index].enabled = enabled
+                    RemoteMonitor.saveHosts(hosts)
+                }
+            }
+        )
+    }
+}
+
 // MARK: - About
 
 private struct AboutPane: View {
+    private var inApplications: Bool { Bundle.main.bundlePath.hasPrefix("/Applications/") }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 22) {
             SSection {
@@ -1072,6 +1151,21 @@ private struct AboutPane: View {
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 22)
+            }
+
+            SSection(title: "Installation",
+                     footer: inApplications
+                     ? "Running from /Applications."
+                     : "Copies the app to /Applications and relaunches from there. Login item and permissions follow the stable bundle ID. Note: rebuilding with make-app.sh launches the dist copy again — pass --install to update /Applications.") {
+                SRow(title: inApplications ? "Installed in /Applications" : "Install to /Applications",
+                     subtitle: Bundle.main.bundlePath) {
+                    if !inApplications {
+                        Button("Install") { LoginItem.installToApplications() }
+                    } else {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundStyle(AgentStatus.working.color)
+                    }
+                }
             }
 
             SSection(title: "Tracked data", footer: "Everything is read locally — Claude Code's session registry, transcripts and task store under ~/.claude, plus the process table. Nothing leaves your Mac.") {

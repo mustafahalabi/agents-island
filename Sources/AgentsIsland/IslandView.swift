@@ -630,6 +630,11 @@ private struct SessionCard: View {
             if terminal, let app = agent.terminalApp {
                 Chip(text: app, textColor: .white.opacity(0.65), background: .white.opacity(0.08))
             }
+            if let host = agent.remoteHost {
+                Chip(text: host, textColor: Color(red: 0.55, green: 0.80, blue: 1.0),
+                     background: Color(red: 0.3, green: 0.55, blue: 0.9).opacity(0.18),
+                     icon: "network")
+            }
         }
         .fixedSize()
     }

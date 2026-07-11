@@ -130,6 +130,10 @@ Sources/AgentsIsland/
                             parser (status, activity, plan todos, model, messages)
   GeminiSessions.swift      Gemini per-project reader: cwd→sha256 dir, logs.json
                             prompts, saved-chat transcripts, settings model
+  ApprovalCenter.swift      permission approvals: hook installer, notification
+                            spool watcher, approve/deny via tty keys
+  UsageTracker.swift        5h/7d quota estimate from transcript usage fields
+  RemoteMonitor.swift       SSH host scanning → remote sessions (BatchMode)
   TerminalBridge.swift      tty-targeted jump/send (AppleScript, tmux), frontmost
                             terminal check for smart suppression
   SoundEngine.swift         per-event sounds, volume, quiet hours, custom imports
@@ -143,22 +147,29 @@ Sources/AgentsIsland/
 
 ---
 
-## Roadmap (discussed, not yet built)
+## Roadmap — SHIPPED (full sweep, 2026-07-11)
 
-- **Permission approval buttons** — approve/deny Claude Code tool requests from the island (needs a PreToolUse hook signaling the app). *Task #2, in progress.* The Shortcuts pane already reserves Approve/Deny keys for this.
-- **Usage quota header** — 5h/7d limit percentages + reset countdown, Vibe-style. *Task #3.*
-- Quick-reply revival (plumbing already in `TerminalBridge.send`).
-- Plan preview with Markdown rendering; SSH remotes.
-- Subagent / Agent-Team visibility on cards (Vibe parity).
-- Install to `/Applications`.
-- Two-stage expansion (width first, then height) if the stretch should read even stronger.
+Everything from the original roadmap is now built (plus the earlier Settings 2.0 sweep: `mod+G` switcher, hide-in-fullscreen, My Sounds, multi-screen display picker):
 
-### Done since (Settings 2.0 sweep, 2026-07-11)
-- ~~Global hotkey to toggle the island~~ → `mod+G` switcher. ~~Hide-in-fullscreen~~ → General pane. ~~Custom sound packs~~ → My Sounds import. Multi-screen display picker shipped.
+- **Permission approvals** (`ApprovalCenter.swift`) — a Claude Code **PermissionRequest + Notification hook** (installed from Settings → Integrations; idempotent merge into `~/.claude/settings.json` with a backup, verified against the real peon-ping-laden config) spools events to `~/.claude/agents-island/notifications/`. The island auto-expands with **Approve / Always Allow / Deny** buttons that answer the actual terminal prompt via raw tty keys (1/2/3 — exact tty targeting on iTerm/tmux via `TerminalBridge.sendKey`, activate+System Events elsewhere). The hook never blocks Claude; the terminal prompt stays usable in parallel. Approval Needed sound; global `mod+Y/A/N` hotkeys registered **only while a request is pending**. Pending state clears when answered anywhere (activity moved on / turn ended) or after 10 min.
+- **Usage quota header** (`UsageTracker.swift`) — ccusage-style local estimate: weighted tokens (cache reads ×0.1) from every transcript's `message.usage`, hourly buckets, incremental append-only reads after a one-time backfill (~7s for 320MB). Derives the active **5h session block** (first message after a ≥5h gap, hour-floored) and rolling **7d** total vs. per-plan budget estimates (Pro/Max5x/Max20x picker in the Usage pane). Header shows `5h 70% ⟳1h20m · 7d 24%`.
+- **Quick-reply** — text field in the detail view → `TerminalBridge.send` to the exact tty.
+- **Subagent visibility** — Task/Agent tool calls from the transcript tail; running ones pulse, recent finishes dim; card shows the section only while something runs.
+- **Plan preview** — last `ExitPlanMode` plan, light Markdown (headers/bullets/inline), collapsed to one line.
+- **SSH remotes v1** (`RemoteMonitor.swift`) — SSH Remote pane manages hosts; every 10s each enabled host gets one `ssh -o BatchMode=yes -o ConnectTimeout=4` round-trip (`ps` + `/proc/*/cwd` on Linux). Remote sessions merge into the list with negative synthetic ids, host chip, CPU status, model from args; no click-to-jump. Key-auth only — never prompts.
+- **Install to /Applications** — About pane button (copies bundle, relaunches; login item re-registers on launch) and `./make-app.sh --install`.
+- **Two-stage expansion** — evaluated and **intentionally not built**: the container-first morph (shape stretches, content materializes ~120ms later) already reads as staged; a hard width→height split risks the polished feel for marginal gain.
+
+### Future ideas (new, unscoped)
+- Approve/deny for AskUserQuestion multi-option prompts (currently permission prompts only).
+- Remote rich sessions (read remote ~/.claude over ssh) and remote jump (open a local ssh tab).
+- Codex/Gemini live verification once those CLIs run on this machine (readers are fixture-tested).
 
 ## Gotchas
 
-- Login item points at `dist/AgentsIsland.app` — re-run `./make-app.sh` if the project moves.
-- First jump to iTerm/Terminal triggers the macOS Automation prompt (one-time approve).
+- Login item tracks the launched bundle (re-registered each launch); `./make-app.sh` relaunches the dist copy — use `--install` to refresh /Applications.
+- First jump to iTerm/Terminal triggers the macOS Automation prompt; answering approvals in Terminal.app/other terminals needs Accessibility (System Events keystroke). iTerm/tmux need nothing extra.
+- The approval hook requires restarting running Claude sessions after install.
+- Usage percentages are estimates — Anthropic doesn't publish budgets; plan presets in the Usage pane.
 - `screencapture` from this terminal lacks screen-recording permission — UI must be eyeballed.
-- Git repo initialized; **nothing committed yet**.
+- Committing per feature; repo history starts 2026-07-11.

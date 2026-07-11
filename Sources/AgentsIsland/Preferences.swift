@@ -64,6 +64,9 @@ enum Pref {
     static let shortcutModifier = "shortcutModifier"    // "control" | "option" | "command"
     static let reverseSwitcher = "reverseSwitcher"      // shift+modifier cycles backwards
 
+    // MARK: SSH remotes
+    static let sshHosts = "sshHosts"                    // JSON [{host, enabled}]
+
     // MARK: Agents
     static let disabledAgents = "disabledAgents"        // CSV of AgentKind rawValues
 

@@ -39,6 +39,14 @@ EOF
 
 codesign --force --sign - "$APP" 2>/dev/null || true
 
+# --install: put the bundle in /Applications and run it from there.
+if [ "$1" = "--install" ]; then
+    TARGET="/Applications/AgentsIsland.app"
+    rm -rf "$TARGET"
+    cp -R "$APP" "$TARGET"
+    APP="$TARGET"
+fi
+
 pkill -x AgentsIsland 2>/dev/null || true
 sleep 0.5
 open "$APP"

@@ -132,6 +132,7 @@ struct AgentSession: Identifiable, Equatable {
     var gitBranch: String?     // current branch of the session's cwd
     var subagents: [Subagent] = []
     var plan: String?          // markdown from the last ExitPlanMode call
+    var remoteHost: String?    // set for sessions discovered over SSH
 
     /// "claude-opus-4-8" → "Opus 4.8", "claude-sonnet-5" → "Sonnet 5",
     /// "gpt-5-codex" → "GPT 5 Codex", "o4-mini" → "O4 Mini".
