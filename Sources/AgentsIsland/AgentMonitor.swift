@@ -229,9 +229,11 @@ final class AgentMonitor: ObservableObject {
 
     /// Recognize an agent from its full command line. Matches the executable
     /// basename directly, or the script argument when run via an interpreter.
+    /// Binaries inside .app bundles are GUI apps, not CLI agents — the Claude
+    /// Desktop app's binary is literally named "Claude" and would ghost in.
     static func detect(args: String) -> AgentKind? {
         let tokens = args.split(separator: " ")
-        guard let first = tokens.first else { return nil }
+        guard let first = tokens.first, !first.contains(".app/") else { return nil }
         let exe = basename(String(first))
 
         if let kind = AgentKind(matching: exe) { return kind }
@@ -239,7 +241,7 @@ final class AgentMonitor: ObservableObject {
         let interpreters: Set<String> = ["node", "bun", "deno", "python", "python3", "uv", "npx"]
         if interpreters.contains(exe.lowercased()) {
             for token in tokens.dropFirst() {
-                if token.hasPrefix("-") { continue }
+                if token.hasPrefix("-") || token.contains(".app/") { continue }
                 if let kind = AgentKind(matching: basename(String(token))) { return kind }
             }
         }
