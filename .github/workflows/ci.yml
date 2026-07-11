@@ -1,0 +1,17 @@
+name: CI
+
+# Releases are cut locally with scripts/release.sh (signing + notarization
+# need the Developer ID certificate, which lives in the maintainer's
+# keychain). CI just proves every push builds.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build app bundle
+        run: ./make-app.sh --no-launch

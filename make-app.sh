@@ -6,6 +6,9 @@
 #   ./make-app.sh --install    also copy to /Applications and launch from there
 #   ./make-app.sh --no-launch  build only (CI / packaging)
 #   VERSION=1.2.0 ./make-app.sh   stamp a version into Info.plist
+#   SIGN_ID="Developer ID Application: …" ./make-app.sh
+#                              sign with hardened runtime (notarizable);
+#                              default is ad-hoc signing
 set -e
 cd "$(dirname "$0")"
 
@@ -44,7 +47,12 @@ cat > "$APP/Contents/Info.plist" <<EOF
 </plist>
 EOF
 
-codesign --force --sign - "$APP" 2>/dev/null || true
+if [ -n "${SIGN_ID:-}" ]; then
+    codesign --force --options runtime --timestamp --sign "$SIGN_ID" "$APP"
+    codesign --verify --strict "$APP"
+else
+    codesign --force --sign - "$APP" 2>/dev/null || true
+fi
 
 # --install: put the bundle in /Applications and run it from there.
 if [ "$1" = "--install" ]; then
