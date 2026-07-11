@@ -39,10 +39,31 @@ struct AgentIconView: View {
         }
     }
 
+    /// SwiftPM's generated `Bundle.module` for executables probes the .app
+    /// root and then an absolute path on the *build* machine — it fatalErrors
+    /// on any Mac that didn't compile the binary. Resolve the resource bundle
+    /// ourselves, and degrade to the monogram fallback instead of crashing.
+    private static let resources: Bundle? = {
+        let name = "AgentsIsland_AgentsIsland.bundle"
+        let candidates: [URL?] = [
+            Bundle.main.resourceURL,                                // .app Contents/Resources
+            Bundle.main.executableURL?.deletingLastPathComponent(), // bare `swift run`
+            Bundle.main.bundleURL,
+        ]
+        for candidate in candidates {
+            if let url = candidate?.appendingPathComponent(name),
+               FileManager.default.fileExists(atPath: url.path),
+               let bundle = Bundle(url: url) {
+                return bundle
+            }
+        }
+        return nil
+    }()
+
     private static func load(kind: AgentKind) -> NSImage? {
         guard let file = kind.iconFile else { return nil }
         if let cached = cache[file] { return cached }
-        guard let url = Bundle.module.url(forResource: file, withExtension: "png", subdirectory: "agents"),
+        guard let url = resources?.url(forResource: file, withExtension: "png", subdirectory: "agents"),
               let image = NSImage(contentsOf: url) else { return nil }
         cache[file] = image
         return image
