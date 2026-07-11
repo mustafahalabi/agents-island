@@ -61,6 +61,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         AgentMonitor.shared.start()
         SoundEngine.shared.start()
         ApprovalCenter.shared.start()
+        UsageTracker.shared.start()
         HotKeyCenter.shared.update()
         panel = NotchPanel(monitor: AgentMonitor.shared)
         SwitcherState.shared.panel = panel

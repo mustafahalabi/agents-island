@@ -51,6 +51,10 @@ enum Pref {
     static let quietHoursStart = "quietHoursStart"      // minutes from midnight
     static let quietHoursEnd = "quietHoursEnd"
 
+    // MARK: Usage
+    static let usageEnabled = "usageEnabled"            // estimate quota from transcripts
+    static let usagePlan = "usagePlan"                  // "pro" | "max5x" | "max20x"
+
     // MARK: Notifications
     static let notifyOnComplete = "notifyOnComplete"    // macOS notification when an agent finishes
     static let notifyOnStart = "notifyOnStart"          // macOS notification when a session appears
@@ -106,6 +110,9 @@ enum Pref {
             quietHoursEnabled: false,
             quietHoursStart: 22 * 60,
             quietHoursEnd: 8 * 60,
+
+            usageEnabled: true,
+            usagePlan: "max5x",
 
             notifyOnComplete: true,
             notifyOnStart: false,

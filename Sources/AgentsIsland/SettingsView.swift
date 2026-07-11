@@ -5,7 +5,7 @@ import UniformTypeIdentifiers
 // MARK: - Panes
 
 enum SettingsPane: String, CaseIterable, Identifiable {
-    case general, integrations, notifications, display, sound, agents, shortcuts, about
+    case general, integrations, notifications, display, sound, usage, agents, shortcuts, about
 
     var id: String { rawValue }
 
@@ -16,6 +16,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
         case .notifications: return "Notifications"
         case .display: return "Display"
         case .sound: return "Sound"
+        case .usage: return "Usage"
         case .agents: return "Agents"
         case .shortcuts: return "Shortcuts"
         case .about: return "About"
@@ -29,6 +30,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
         case .notifications: return "bell.badge.fill"
         case .display: return "textformat.size"
         case .sound: return "speaker.wave.2.fill"
+        case .usage: return "gauge.with.needle.fill"
         case .agents: return "sparkles"
         case .shortcuts: return "keyboard.fill"
         case .about: return "info.circle.fill"
@@ -42,6 +44,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
         case .notifications: return Color(red: 0.94, green: 0.35, blue: 0.32)
         case .display: return Color(red: 0.45, green: 0.45, blue: 0.95)
         case .sound: return Color(red: 0.25, green: 0.75, blue: 0.40)
+        case .usage: return Color(red: 0.90, green: 0.30, blue: 0.45)
         case .agents: return Color(red: 0.95, green: 0.60, blue: 0.20)
         case .shortcuts: return Color(red: 0.70, green: 0.40, blue: 0.90)
         case .about: return Color(red: 0.30, green: 0.60, blue: 0.95)
@@ -49,7 +52,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
     }
 
     /// Panes shown below the "Advanced" separator in the sidebar.
-    static let main: [SettingsPane] = [.general, .integrations, .notifications, .display, .sound, .agents]
+    static let main: [SettingsPane] = [.general, .integrations, .notifications, .display, .sound, .usage, .agents]
     static let advanced: [SettingsPane] = [.shortcuts, .about]
 }
 
@@ -111,6 +114,7 @@ struct SettingsView: View {
                 case .notifications: NotificationsPane()
                 case .display: DisplayPane()
                 case .sound: SoundPane()
+                case .usage: UsagePane()
                 case .agents: AgentsPane()
                 case .shortcuts: ShortcutsPane()
                 case .about: AboutPane()
@@ -836,6 +840,90 @@ private struct HourPicker: View {
 
     private func label(_ mins: Int) -> String {
         String(format: "%02d:%02d", mins / 60, mins % 60)
+    }
+}
+
+// MARK: - Usage
+
+private struct UsagePane: View {
+    @AppStorage(Pref.usageEnabled) private var enabled = true
+    @AppStorage(Pref.usagePlan) private var plan = "max5x"
+    @ObservedObject private var tracker = UsageTracker.shared
+
+    var body: some View {
+        let budgets = UsageTracker.budgets(plan: plan)
+        let snapshot = tracker.snapshot
+        VStack(alignment: .leading, spacing: 22) {
+            SSection(footer: "Estimated locally from transcript token counts (cache reads weighted at 10%). Anthropic doesn't publish exact budgets — pick the plan that matches yours and treat the percentages as a guide.") {
+                SRow(title: "Show usage in the panel header") {
+                    Toggle("", isOn: $enabled).toggleStyle(.switch).labelsHidden()
+                }
+                SDiv()
+                SRow(title: "Plan") {
+                    Picker("", selection: $plan) {
+                        Text("Pro").tag("pro")
+                        Text("Max 5x").tag("max5x")
+                        Text("Max 20x").tag("max20x")
+                    }
+                    .labelsHidden()
+                    .fixedSize()
+                }
+            }
+
+            SSection(title: "Current 5-hour window") {
+                if let reset = snapshot.blockResetAt,
+                   let percent = snapshot.blockPercent(budget: budgets.block) {
+                    SRow(title: "Used", subtitle: Self.tokens(snapshot.blockTokens) + " weighted tokens") {
+                        UsageBar(percent: percent)
+                    }
+                    SDiv()
+                    SRow(title: "Resets") {
+                        Text(reset, style: .relative)
+                            .font(.system(size: 12, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                    }
+                } else {
+                    SRow(title: "No active session window",
+                         subtitle: "A window opens with your next Claude message.") { EmptyView() }
+                }
+            }
+
+            SSection(title: "Rolling 7 days") {
+                SRow(title: "Used", subtitle: Self.tokens(snapshot.weekTokens) + " weighted tokens") {
+                    UsageBar(percent: snapshot.weekPercent(budget: budgets.week))
+                }
+            }
+        }
+    }
+
+    private static func tokens(_ value: Double) -> String {
+        value >= 1_000_000_000 ? String(format: "%.1fB", value / 1_000_000_000)
+            : value >= 1_000_000 ? String(format: "%.1fM", value / 1_000_000)
+            : String(format: "%.0fK", value / 1_000)
+    }
+}
+
+private struct UsageBar: View {
+    let percent: Int
+
+    var body: some View {
+        HStack(spacing: 8) {
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Color.white.opacity(0.1))
+                    Capsule()
+                        .fill(percent >= 90 ? Color(red: 1.0, green: 0.45, blue: 0.45)
+                            : percent >= 70 ? AgentStatus.waiting.color
+                            : AgentStatus.working.color)
+                        .frame(width: geo.size.width * min(1, CGFloat(percent) / 100))
+                }
+            }
+            .frame(width: 120, height: 6)
+            Text("\(min(percent, 999))%")
+                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                .foregroundStyle(.secondary)
+                .frame(width: 40, alignment: .trailing)
+        }
     }
 }
 

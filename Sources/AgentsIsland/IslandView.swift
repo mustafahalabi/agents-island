@@ -243,6 +243,8 @@ struct IslandView: View {
                 Text("↑↓ select · ⏎ jump · esc close")
                     .font(.system(size: 9.5, weight: .medium, design: .rounded))
                     .foregroundStyle(.white.opacity(0.35))
+            } else {
+                UsageHeaderChip()
             }
 
             Button(action: openSettings) {
@@ -317,6 +319,50 @@ struct IslandView: View {
 
     private func openSettings() {
         SettingsWindowController.shared.show()
+    }
+}
+
+/// Vibe-style quota estimate in the header: "5h 34% · ⟳1h20m · 7d 61%".
+private struct UsageHeaderChip: View {
+    @ObservedObject private var tracker = UsageTracker.shared
+    @AppStorage(Pref.usageEnabled) private var enabled = true
+    @AppStorage(Pref.usagePlan) private var plan = "max5x"
+
+    var body: some View {
+        if enabled, tracker.snapshot.weekTokens > 0 {
+            let budgets = UsageTracker.budgets(plan: plan)
+            let snapshot = tracker.snapshot
+            HStack(spacing: 7) {
+                if let blockPercent = snapshot.blockPercent(budget: budgets.block),
+                   let reset = snapshot.blockResetAt {
+                    Text("5h")
+                        .foregroundStyle(.white.opacity(0.35))
+                    Text("\(min(blockPercent, 999))%")
+                        .foregroundStyle(color(for: blockPercent))
+                    Text("⟳ \(countdown(to: reset))")
+                        .foregroundStyle(.white.opacity(0.35))
+                    Text("·").foregroundStyle(.white.opacity(0.2))
+                }
+                Text("7d")
+                    .foregroundStyle(.white.opacity(0.35))
+                Text("\(min(snapshot.weekPercent(budget: budgets.week), 999))%")
+                    .foregroundStyle(color(for: snapshot.weekPercent(budget: budgets.week)))
+            }
+            .font(.system(size: 10, weight: .semibold, design: .rounded))
+            .help("Estimated Claude usage — configure in Settings → Usage")
+        }
+    }
+
+    private func color(for percent: Int) -> Color {
+        percent >= 90 ? Color(red: 1.0, green: 0.45, blue: 0.45)
+            : percent >= 70 ? AgentStatus.waiting.color
+            : .white.opacity(0.6)
+    }
+
+    private func countdown(to date: Date) -> String {
+        let seconds = max(0, Int(date.timeIntervalSinceNow))
+        let hours = seconds / 3600, minutes = (seconds % 3600) / 60
+        return hours > 0 ? "\(hours)h \(minutes)m" : "\(minutes)m"
     }
 }
 
