@@ -53,6 +53,11 @@ cat > "$APP/Contents/Info.plist" <<EOF
 </plist>
 EOF
 
+# Strip extended attributes before signing: they become AppleDouble (._*)
+# entries in zips, and CLI `unzip` extracts those as real files inside the
+# sealed bundle — breaking the signature for anyone not using Archive Utility.
+xattr -cr "$APP" 2>/dev/null || true
+
 if [ -n "${SIGN_ID:-}" ]; then
     codesign --force --options runtime --timestamp \
         --entitlements assets/entitlements.plist \
