@@ -54,7 +54,9 @@ cat > "$APP/Contents/Info.plist" <<EOF
 EOF
 
 if [ -n "${SIGN_ID:-}" ]; then
-    codesign --force --options runtime --timestamp --sign "$SIGN_ID" "$APP"
+    codesign --force --options runtime --timestamp \
+        --entitlements assets/entitlements.plist \
+        --sign "$SIGN_ID" "$APP"
     codesign --verify --strict "$APP"
 else
     codesign --force --sign - "$APP" 2>/dev/null || true
