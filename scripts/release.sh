@@ -44,7 +44,7 @@ VERSION="$VERSION" SIGN_ID="$SIGN_ID" ./make-app.sh --no-launch
 # ---- Notarize + staple -------------------------------------------------------
 if [ -n "$SIGN_ID" ]; then
     echo "==> Notarizing (this usually takes 1–5 minutes)…"
-    ditto -c -k --keepParent dist/AgentsIsland.app /tmp/AgentsIsland-notarize.zip
+    ditto -c -k --norsrc --noextattr --noacl --keepParent dist/AgentsIsland.app /tmp/AgentsIsland-notarize.zip
     xcrun notarytool submit /tmp/AgentsIsland-notarize.zip \
         --keychain-profile "$NOTARY_PROFILE" --wait
     xcrun stapler staple dist/AgentsIsland.app
@@ -52,7 +52,10 @@ if [ -n "$SIGN_ID" ]; then
 fi
 
 # ---- Package ------------------------------------------------------------------
-ditto -c -k --keepParent dist/AgentsIsland.app AgentsIsland.zip
+# --noextattr/--norsrc: xattrs (e.g. com.apple.provenance, added by macOS
+# during signing) become AppleDouble ._ files that CLI unzip extracts as real
+# files inside the sealed bundle, breaking Gatekeeper for unzip users.
+ditto -c -k --norsrc --noextattr --noacl --keepParent dist/AgentsIsland.app AgentsIsland.zip
 shasum -a 256 AgentsIsland.zip > AgentsIsland.zip.sha256
 SHA=$(cut -d' ' -f1 < AgentsIsland.zip.sha256)
 
