@@ -67,7 +67,7 @@ brew install --cask mustafahalabi/tap/agents-island
 curl -fsSL https://raw.githubusercontent.com/mustafahalabi/agents-island/main/install.sh | bash
 ```
 
-**Prebuilt** — grab `AgentsIsland.zip` from the [latest release](https://github.com/mustafahalabi/agents-island/releases/latest), drag to /Applications, and **right-click → Open** the first time (releases aren't notarized yet).
+**Prebuilt** — grab `AgentsIsland.zip` from the [latest release](https://github.com/mustafahalabi/agents-island/releases/latest) and drag it to /Applications. Releases from v0.2.2 on are **signed and notarized** — they open like any Mac app, no warnings.
 
 **From a checkout:**
 
