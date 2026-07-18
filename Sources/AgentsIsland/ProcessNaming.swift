@@ -52,4 +52,32 @@ enum ProcessNaming {
     static func executableBasename(_ command: String) -> String {
         (executableToken(command) as NSString).lastPathComponent.lowercased()
     }
+
+    /// Is this a GUI application's background helper rather than a CLI agent?
+    ///
+    /// `detect` already rejects an executable path inside an `.app` bundle, but
+    /// Electron apps rewrite `argv[0]` to a display string, so `ps` reports no
+    /// path at all:
+    ///
+    ///     Cursor Helper: shared-process
+    ///     Cursor Helper (Plugin): extension-host (user) …
+    ///
+    /// The first token is then plain `Cursor`, which matches the registered
+    /// alias for the cursor-agent kind — so every helper Cursor spawns was
+    /// listed as a running agent. Eight ghost sessions on an idle machine with
+    /// only the editor open.
+    ///
+    /// Two conditions together identify them, and both are needed:
+    ///
+    /// - **the parent is a GUI app binary.** A real CLI agent is launched from
+    ///   a shell, so its immediate parent is `/bin/zsh` or similar, never
+    ///   `/Applications/Foo.app/Contents/MacOS/Foo`. An agent running in an
+    ///   editor's integrated terminal is still a child of a shell.
+    /// - **there is no controlling terminal.** Requiring this on its own would
+    ///   be too broad, and requiring only the parent check would drop an agent
+    ///   from a terminal configured to exec it directly instead of a shell.
+    static func isGUIHelper(tty: String?, parentCommand: String?) -> Bool {
+        guard tty == nil, let parentCommand else { return false }
+        return parentCommand.contains(".app/")
+    }
 }

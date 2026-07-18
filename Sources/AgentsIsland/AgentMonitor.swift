@@ -130,7 +130,13 @@ final class AgentMonitor: ObservableObject {
 
         // Drop children whose parent is the same agent (forked helpers).
         let agentKindByPid = Dictionary(uniqueKeysWithValues: candidates.map { ($0.pid, $0.kind) })
-        let rows = candidates.filter { agentKindByPid[$0.ppid] != $0.kind }
+        let rows = candidates.filter {
+            // Drop forked helpers of the same agent…
+            agentKindByPid[$0.ppid] != $0.kind
+            // …and GUI background helpers, which Electron names after the app
+            // itself so they match an agent alias. See ProcessNaming.
+            && !ProcessNaming.isGUIHelper(tty: $0.tty, parentCommand: procs[$0.ppid]?.command)
+        }
 
         // Retire pid → rollout mappings for codex processes that have exited.
         // Left unpruned, a recycled pid inherits the previous session's rollout
