@@ -7,6 +7,7 @@ DerivedData/
 
 # Release artifacts
 AgentsIsland-*.dmg
+AgentsIsland-*.dmg.sha256
 AgentsIsland.zip*
 appcast.xml
 
