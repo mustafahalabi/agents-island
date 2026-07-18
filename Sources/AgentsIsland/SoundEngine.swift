@@ -50,6 +50,10 @@ final class SoundEngine {
         }
         guard let sound else { return }
         sound.volume = Float(defaults.double(forKey: Pref.soundVolume))
+        // NSSound(named:) hands back a shared, cached instance, and .play() is a
+        // no-op while it's already playing — so a second event within the sound's
+        // duration would be silent. Rewind first so every event actually sounds.
+        if sound.isPlaying { sound.stop() }
         current = sound
         sound.play()
     }
