@@ -72,6 +72,13 @@ run "RolloutAssignmentTests" "$TMP/rollout" \
     Sources/AgentsIsland/RolloutAssignment.swift \
     scripts/tests/RolloutAssignmentTests.swift
 
+run "CodexPhaseTests" "$TMP/codexphase" \
+    Sources/AgentsIsland/Agent.swift \
+    Sources/AgentsIsland/TailRead.swift \
+    Sources/AgentsIsland/RolloutAssignment.swift \
+    Sources/AgentsIsland/CodexSessions.swift \
+    scripts/tests/CodexPhaseTests.swift
+
 # Spawns real child processes (sleep/echo) — no network, but it does wait out a
 # 2s timeout, so this suite is the slow one.
 run "SubprocessTests" "$TMP/subproc" \
