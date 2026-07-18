@@ -219,6 +219,23 @@ final class RemoteMonitor: ObservableObject {
         let kindByPid = Dictionary(candidates.map { ($0.pid, $0.kind) }, uniquingKeysWith: { first, _ in first })
         let rows = candidates.filter { kindByPid[$0.ppid] != $0.kind }
 
+        // macOS remotes have no /proc, so the cwd loop above found nothing there.
+        // Fetch just the agent cwds with a targeted lsof (one extra round-trip,
+        // only when a session is missing its directory).
+        let missing = rows.filter { cwds[$0.pid] == nil }.map { String($0.pid) }
+        if !missing.isEmpty, let out = run("/usr/bin/ssh", [
+            "-o", "BatchMode=yes", "-o", "ConnectTimeout=4",
+            "-o", "ServerAliveInterval=3", "-o", "ServerAliveCountMax=2",
+            "-o", "StrictHostKeyChecking=accept-new",
+            host, "lsof -a -d cwd -p \(missing.joined(separator: ",")) -Fn 2>/dev/null",
+        ]) {
+            var currentPid: Int32?
+            for line in out.split(separator: "\n") {
+                if line.hasPrefix("p") { currentPid = Int32(line.dropFirst()) }
+                else if line.hasPrefix("n"), let pid = currentPid { cwds[pid] = String(line.dropFirst()) }
+            }
+        }
+
         return rows.map { row in
             let bypass = row.args.contains("bypassPermissions")
                 || row.args.contains("--dangerously-skip-permissions")

@@ -10,6 +10,12 @@ final class AgentMonitor: ObservableObject {
     private var timer: Timer?
     private var currentInterval: TimeInterval = 0
     private var hasScannedOnce = false
+    /// CPU-only agents that just went working → idle; completion fires on the
+    /// next scan if they're still idle (one-scan debounce to ride out CPU dips).
+    private var pendingCompletion: Set<Int32> = []
+    /// Kinds whose status comes from a transcript/registry (real working/waiting),
+    /// so they reach `.waiting` and don't need the CPU-idle completion heuristic.
+    private static let richStatusKinds: Set<AgentKind> = [.claude, .codex, .gemini]
     private let queue = DispatchQueue(label: "agents-island.scan", qos: .utility)
 
     func start() {
@@ -42,7 +48,9 @@ final class AgentMonitor: ObservableObject {
                 // .agentStarted / its start sound.
                 let firstScan = !self.hasScannedOnce
                 self.hasScannedOnce = true
-                guard self.agents != found else { return }
+                // Also proceed when a debounced completion is armed — the "still
+                // idle" scan that fires it often leaves the list otherwise unchanged.
+                guard self.agents != found || !self.pendingCompletion.isEmpty else { return }
 
                 // uniquingKeysWith (not the trapping uniqueKeysWithValues):
                 // remote synthetic ids are hashed and could, in theory, collide.
@@ -52,6 +60,7 @@ final class AgentMonitor: ObservableObject {
                 // already running would otherwise "start" at once.
                 if !firstScan {
                     for session in found {
+                        let cpuOnly = !Self.richStatusKinds.contains(session.kind)
                         switch (previous[session.id], session.status) {
                         case (nil, _):
                             NotificationCenter.default.post(name: .agentStarted, object: session.id)
@@ -59,10 +68,25 @@ final class AgentMonitor: ObservableObject {
                             NotificationCenter.default.post(name: .agentCompleted, object: session.id)
                         case (.waiting, .working), (.idle, .working):
                             NotificationCenter.default.post(name: .agentAcknowledged, object: session.id)
+                        case (.working, .idle) where cpuOnly:
+                            // Arm a debounced completion — don't fire yet.
+                            self.pendingCompletion.insert(session.id)
                         default:
                             break
                         }
+                        // Fire the deferred completion only if the agent is still
+                        // idle a scan later (a working flap cancels it).
+                        if cpuOnly, self.pendingCompletion.contains(session.id) {
+                            if session.status == .working {
+                                self.pendingCompletion.remove(session.id)
+                            } else if session.status == .idle, previous[session.id] == .idle {
+                                NotificationCenter.default.post(name: .agentCompleted, object: session.id)
+                                self.pendingCompletion.remove(session.id)
+                            }
+                        }
                     }
+                    let live = Set(found.map(\.id))
+                    self.pendingCompletion = self.pendingCompletion.filter { live.contains($0) }
                 }
                 self.agents = found
                 ApprovalCenter.shared.sync(agents: found)
