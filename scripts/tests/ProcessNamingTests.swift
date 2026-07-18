@@ -13,6 +13,11 @@ import Foundation
 struct ProcessNamingTests {
     static var failures = 0
 
+    static func fail(_ message: String, _ line: Int = #line) {
+        failures += 1
+        print("FAIL:\(line)  \(message)")
+    }
+
     static func expect(_ command: String, _ want: String?, _ line: Int = #line) {
         let got = ProcessNaming.appBundleName(fromCommand: command)
         if got != want {
@@ -61,8 +66,51 @@ struct ProcessNamingTests {
             }
         }
 
+        // --- GUI helpers must not be listed as agents -------------------------
+        // Electron rewrites argv[0] to a display string, so `ps` shows no path
+        // and the first token is plain "Cursor" — which matches the cursor-agent
+        // alias. On an idle machine with only the editor open this produced
+        // eight ghost sessions. Real argv taken from a live process table.
+        let cursorApp = "/Applications/Cursor.app/Contents/MacOS/Cursor"
+        let ghosts = [
+            "Cursor Helper: shared-process",
+            "Cursor Helper: fileWatcher [1:81d94e91505b53393daf61fdaf3407b4]",
+            "Cursor Helper: mcp-process",
+            "Cursor Helper: terminal pty-host",
+            "Cursor Helper (Plugin): extension-host (user) live-love-recycle [1-1]",
+            "Cursor Helper (Plugin): extension-host (agent-exec)",
+        ]
+        for ghost in ghosts where !ProcessNaming.isGUIHelper(tty: nil, parentCommand: cursorApp) {
+            failures += 1
+            print("FAIL: GUI helper would be listed as an agent: \(ghost)")
+        }
+
+        // A real agent in a terminal must survive: it has a tty and its parent
+        // is a shell, not an app bundle.
+        if ProcessNaming.isGUIHelper(tty: "ttys008", parentCommand: "/bin/zsh -il") {
+            fail("a real agent in a terminal was treated as a GUI helper")
+        }
+        // Even inside an editor's integrated terminal, the parent is a shell.
+        if ProcessNaming.isGUIHelper(tty: "ttys015", parentCommand: "-/bin/zsh") {
+            fail("an agent in an integrated terminal was treated as a GUI helper")
+        }
+        // A tty is enough on its own, even when the parent IS the app bundle —
+        // covers a terminal configured to exec the agent instead of a shell.
+        if ProcessNaming.isGUIHelper(tty: "ttys003", parentCommand: cursorApp) {
+            fail("an agent with a tty must never be dropped")
+        }
+        // Headless agents whose parent is a shell are not GUI helpers; the
+        // separate isHeadless check owns that decision.
+        if ProcessNaming.isGUIHelper(tty: nil, parentCommand: "/bin/bash") {
+            fail("a tty-less agent under a shell must not be dropped here")
+        }
+        // Unknown parent: not enough evidence to drop.
+        if ProcessNaming.isGUIHelper(tty: nil, parentCommand: nil) {
+            fail("unknown parent should not be treated as a GUI helper")
+        }
+
         if failures == 0 {
-            print("✅ ProcessNamingTests: all passed (space-containing app paths resolve)")
+            print("✅ ProcessNamingTests: all passed (app paths resolve, GUI helpers excluded)")
         } else {
             print("❌ ProcessNamingTests: \(failures) failure(s)"); exit(1)
         }
