@@ -2,6 +2,10 @@
 
 **A Dynamic Island for your AI coding agents.**
 
+[![CI](https://github.com/mustafahalabi/agents-island/actions/workflows/ci.yml/badge.svg)](https://github.com/mustafahalabi/agents-island/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Platform: macOS 14+](https://img.shields.io/badge/platform-macOS%2014%2B-lightgrey.svg)](#install)
+
 Agents Island turns the MacBook notch into a live control surface for every AI coding agent running on your machine — Claude Code, Codex, Gemini CLI, Aider, Goose, OpenCode, Amp, Cursor Agent, Copilot CLI, and Droid. Glance at the pill to see who's working; hover to see what they're doing; click to jump to the exact terminal tab; approve permission requests without leaving your current app.
 
 Native SwiftUI. No Electron, no dock icon, no cloud — everything is read from local files your agents already write.
@@ -143,6 +147,25 @@ Sources/AgentsIsland/
 ```
 
 See [PROJECT.md](PROJECT.md) for the full design log and data-source documentation.
+
+---
+
+## Contributing
+
+Contributions are welcome. Start with **[CONTRIBUTING.md](CONTRIBUTING.md)** — it
+covers the local setup, the branch/PR flow, and the two hard constraints (no
+third-party dependencies, nothing leaves your machine).
+
+- `main` is protected: every change lands through a reviewed pull request with green CI.
+- Adding a new agent? There's a [dedicated issue template](https://github.com/mustafahalabi/agents-island/issues/new?template=new_agent.yml), and [PROJECT.md](PROJECT.md) documents every agent's on-disk data sources.
+- By participating you agree to the [Code of Conduct](CODE_OF_CONDUCT.md).
+- Found a security issue? Please report it [privately](SECURITY.md), not as an issue.
+
+---
+
+## License
+
+[MIT](LICENSE) © Mustafa Halabi
 
 ---
 

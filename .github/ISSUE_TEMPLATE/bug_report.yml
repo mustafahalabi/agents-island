@@ -1,0 +1,74 @@
+name: Bug report
+description: Something in Agents Island doesn't work the way it should
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Please don't file security vulnerabilities here —
+        use [private reporting](https://github.com/mustafahalabi/agents-island/security/advisories/new) instead.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you expect, and what did you get instead?
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Start Claude Code in iTerm
+        2. Hover the island
+        3. ...
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Agents Island version
+      description: Menu bar icon → About, or the release you installed.
+    validations:
+      required: true
+
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version and Mac model
+      placeholder: "macOS 15.2, MacBook Pro 14-inch M3 (notch)"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: agents
+    attributes:
+      label: Which agents were running?
+      multiple: true
+      options:
+        - Claude Code
+        - Codex
+        - Gemini CLI
+        - Aider
+        - Goose
+        - OpenCode
+        - Amp
+        - Cursor Agent
+        - Copilot CLI
+        - Droid
+        - None / not agent-specific
+
+  - type: input
+    id: terminal
+    attributes:
+      label: Terminal app
+      placeholder: "iTerm2 3.5.11 / Terminal.app / tmux inside Ghostty"
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Screenshots, recordings, or logs
+      description: A screen recording of the island is worth a lot for visual bugs.

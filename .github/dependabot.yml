@@ -1,0 +1,9 @@
+version: 2
+updates:
+  # The app itself has no package dependencies by design; only CI actions
+  # need updating.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    labels: ["ci"]

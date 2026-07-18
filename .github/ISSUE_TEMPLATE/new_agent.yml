@@ -1,0 +1,41 @@
+name: Support a new agent
+description: Request support for an AI coding agent that isn't detected yet
+labels: ["enhancement", "new-agent"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Agents Island reads local files agents already write. An agent is only
+        supportable if its CLI writes session data to disk in a readable format.
+
+  - type: input
+    id: agent
+    attributes:
+      label: Which agent?
+      placeholder: "Cline, Continue, ..."
+    validations:
+      required: true
+
+  - type: input
+    id: process
+    attributes:
+      label: Process name / command
+      description: "Output of `ps -eo comm,args | grep -i <agent>` while it's running."
+    validations:
+      required: true
+
+  - type: textarea
+    id: data
+    attributes:
+      label: Where does it write session data?
+      description: |
+        Transcript files, session registries, logs — paths and formats.
+        e.g. `~/.claude/projects/<slug>/<session>.jsonl` (JSONL transcript)
+    validations:
+      required: true
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: Anything else
+      description: Sample (redacted) session file contents are extremely helpful.
