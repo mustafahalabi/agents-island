@@ -23,6 +23,7 @@ enum ClaudeSessions {
         var todos: [Todo] = []
         var subagents: [Subagent] = []
         var plan: String?      // markdown from the last ExitPlanMode call
+        var question: PendingQuestion?  // pending AskUserQuestion, if any
     }
 
     private static let home = FileManager.default.homeDirectoryForCurrentUser.path
@@ -102,8 +103,11 @@ enum ClaudeSessions {
         var pendingTools: [(id: String, description: String)] = []
         var resolvedToolIds = Set<String>()
         var taskCalls: [(id: String, description: String, type: String?)] = []
+        var questionCalls: [(id: String, question: PendingQuestion)] = []
 
-        for obj in tailEntries(path: path, bytes: 192 * 1024) {
+        // A generous window so a pending tool_use (question/plan) survives even
+        // in very active sessions where big tool results pile up after it.
+        for obj in tailEntries(path: path, bytes: 512 * 1024) {
             switch obj["type"] as? String {
             case "ai-title":
                 if let t = obj["aiTitle"] as? String, !t.isEmpty { info.title = t }
@@ -141,6 +145,19 @@ enum ClaudeSessions {
                         if name == "ExitPlanMode", let plan = input["plan"] as? String, !plan.isEmpty {
                             info.plan = plan
                         }
+                        if name == "AskUserQuestion",
+                           let questions = input["questions"] as? [[String: Any]],
+                           let first = questions.first {
+                            let prompt = (first["question"] as? String)
+                                ?? (first["header"] as? String) ?? "Choose an option"
+                            let options = (first["options"] as? [[String: Any]] ?? [])
+                                .compactMap { $0["label"] as? String }
+                            if !options.isEmpty {
+                                questionCalls.append((id, PendingQuestion(
+                                    prompt: prompt, options: options,
+                                    multiSelect: first["multiSelect"] as? Bool ?? false)))
+                            }
+                        }
                     }
                 }
             case "user":
@@ -158,6 +175,11 @@ enum ClaudeSessions {
         }
 
         info.activity = pendingTools.last(where: { !resolvedToolIds.contains($0.id) })?.description
+        // The most recent still-unanswered question. NOTE: Claude Code writes the
+        // AskUserQuestion tool_use together with its result, so this is only
+        // non-nil in the brief write gap — live questions come from the
+        // PreToolUse hook (ApprovalCenter.questions), not the transcript.
+        info.question = questionCalls.last(where: { !resolvedToolIds.contains($0.id) })?.question
 
         // Running subagents first, then the most recent finished ones.
         let running = taskCalls.filter { !resolvedToolIds.contains($0.id) }

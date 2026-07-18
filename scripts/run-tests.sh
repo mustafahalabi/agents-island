@@ -29,6 +29,11 @@ run "AgentDetectionTests" "$TMP/detection" \
     Sources/AgentsIsland/Agent.swift \
     scripts/tests/AgentDetectionTests.swift
 
+run "QuestionParseTests" "$TMP/question" \
+    Sources/AgentsIsland/Agent.swift \
+    Sources/AgentsIsland/ClaudeSessions.swift \
+    scripts/tests/QuestionParseTests.swift
+
 if [ "$fail" = 0 ]; then
     echo "✅ all test suites passed"
 else

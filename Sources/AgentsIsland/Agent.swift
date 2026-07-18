@@ -92,6 +92,14 @@ struct Subagent: Equatable {
     let done: Bool
 }
 
+/// A pending AskUserQuestion the agent is waiting on — rendered as tappable
+/// choice buttons in the island.
+struct PendingQuestion: Equatable {
+    let prompt: String        // the question text
+    let options: [String]     // option labels, in order
+    let multiSelect: Bool
+}
+
 struct AgentSession: Identifiable, Equatable {
     let id: Int32 // pid
     let kind: AgentKind
@@ -114,6 +122,7 @@ struct AgentSession: Identifiable, Equatable {
     var gitBranch: String?     // current branch of the session's cwd
     var subagents: [Subagent] = []
     var plan: String?          // markdown from the last ExitPlanMode call
+    var pendingQuestion: PendingQuestion?  // an AskUserQuestion awaiting an answer
     var remoteHost: String?    // set for sessions discovered over SSH
 
     /// "claude-opus-4-8" → "Opus 4.8", "claude-sonnet-5" → "Sonnet 5",

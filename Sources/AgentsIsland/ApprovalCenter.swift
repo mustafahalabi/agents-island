@@ -34,6 +34,16 @@ final class ApprovalCenter: ObservableObject {
     @Published private(set) var pending: [Int32: Approval] = [:]
     var hasPending: Bool { !pending.isEmpty }
 
+    /// Live AskUserQuestion prompts, delivered by the PreToolUse hook the moment
+    /// the question opens (the transcript only records it after it's answered).
+    struct QuestionEntry: Equatable {
+        let question: PendingQuestion
+        let at: Date
+    }
+    @Published private(set) var questions: [Int32: QuestionEntry] = [:]
+
+    func clearQuestion(pid: Int32) { questions[pid] = nil }
+
     private var timer: Timer?
     private static let home = FileManager.default.homeDirectoryForCurrentUser.path
     static let supportDir = home + "/.claude/agents-island"
@@ -60,10 +70,46 @@ final class ApprovalCenter: ObservableObject {
                   let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
             else { try? fm.removeItem(atPath: path); continue } // unparseable → drop
 
+            let event = obj["hook_event_name"] as? String
+
+            // AskUserQuestion lifecycle: PreToolUse fires the moment the prompt
+            // opens (with the full questions/options JSON); PostToolUse when it's
+            // answered. This is the only real-time source — the transcript gets
+            // the tool_use only after the answer.
+            if event == "PreToolUse" || event == "PostToolUse" {
+                guard obj["tool_name"] as? String == "AskUserQuestion",
+                      let sessionId = obj["session_id"] as? String else {
+                    try? fm.removeItem(atPath: path); continue
+                }
+                guard let pid = registry.first(where: { $0.value.sessionId == sessionId })?.key else {
+                    // Hook can beat the registry file — retry briefly, then drop.
+                    if spoolFileAge(path) > 30 { try? fm.removeItem(atPath: path) }
+                    continue
+                }
+                try? fm.removeItem(atPath: path)
+                if event == "PreToolUse",
+                   let input = obj["tool_input"] as? [String: Any],
+                   let questionList = input["questions"] as? [[String: Any]],
+                   let first = questionList.first {
+                    let prompt = (first["question"] as? String)
+                        ?? (first["header"] as? String) ?? "Choose an option"
+                    let options = (first["options"] as? [[String: Any]] ?? [])
+                        .compactMap { $0["label"] as? String }
+                    if !options.isEmpty {
+                        let entry = QuestionEntry(question: PendingQuestion(
+                            prompt: prompt, options: options,
+                            multiSelect: first["multiSelect"] as? Bool ?? false), at: Date())
+                        DispatchQueue.main.async { self.questions[pid] = entry }
+                    }
+                } else if event == "PostToolUse" {
+                    DispatchQueue.main.async { self.questions[pid] = nil }
+                }
+                continue
+            }
+
             // PermissionRequest events carry the tool name directly; plain
             // Notification events only when the message mentions permission
             // ("waiting for your input" etc. is already the waiting status).
-            let event = obj["hook_event_name"] as? String
             let message = obj["message"] as? String ?? ""
             var tool: String?
             if event == "PermissionRequest" {
@@ -139,8 +185,20 @@ final class ApprovalCenter: ObservableObject {
     /// Called after each monitor scan: drop approvals answered in the
     /// terminal (activity moved on / turn ended) or gone stale.
     func sync(agents: [AgentSession]) {
+        guard hasPending || !questions.isEmpty else { return }
+        let byPid = Dictionary(agents.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+
+        // Questions: answered in the terminal (agent busy again), session gone,
+        // or stale → drop. The PostToolUse hook usually clears them first.
+        for (pid, entry) in questions {
+            let agent = byPid[pid]
+            if agent == nil || agent?.status == .working
+                || Date().timeIntervalSince(entry.at) > 30 * 60 {
+                questions[pid] = nil
+            }
+        }
+
         guard hasPending else { return }
-        let byPid = Dictionary(uniqueKeysWithValues: agents.map { ($0.id, $0) })
         var changed = false
         for (pid, approval) in pending {
             let agent = byPid[pid]
@@ -189,7 +247,9 @@ final class ApprovalCenter: ObservableObject {
         else { return false }
 
         // Merge into ~/.claude/settings.json — PermissionRequest (rich, has
-        // tool_name) plus Notification (fallback on older Claude versions).
+        // tool_name) plus Notification (fallback on older Claude versions),
+        // and the AskUserQuestion lifecycle (PreToolUse fires when the prompt
+        // opens with the full options; PostToolUse when it's answered).
         var root: [String: Any] = [:]
         if let data = fm.contents(atPath: claudeSettingsPath) {
             root = ((try? JSONSerialization.jsonObject(with: data)) as? [String: Any]) ?? [:]
@@ -197,18 +257,26 @@ final class ApprovalCenter: ObservableObject {
                              toPath: claudeSettingsPath + ".agents-island-backup")
         }
         var hooks = root["hooks"] as? [String: Any] ?? [:]
-        for eventName in ["PermissionRequest", "Notification"] {
-            var entries = hooks[eventName] as? [[String: Any]] ?? []
+        let events: [(name: String, matcher: String?)] = [
+            ("PermissionRequest", nil),
+            ("Notification", nil),
+            ("PreToolUse", "AskUserQuestion"),
+            ("PostToolUse", "AskUserQuestion"),
+        ]
+        for event in events {
+            var entries = hooks[event.name] as? [[String: Any]] ?? []
             let alreadyThere = entries.contains { entry in
                 ((entry["hooks"] as? [[String: Any]]) ?? [])
                     .contains { ($0["command"] as? String)?.contains("agents-island") == true }
             }
             if !alreadyThere {
-                entries.append([
+                var entry: [String: Any] = [
                     "hooks": [["type": "command", "command": hookScriptPath, "async": true]]
-                ])
+                ]
+                if let matcher = event.matcher { entry["matcher"] = matcher }
+                entries.append(entry)
             }
-            hooks[eventName] = entries
+            hooks[event.name] = entries
         }
         root["hooks"] = hooks
 
@@ -226,7 +294,7 @@ final class ApprovalCenter: ObservableObject {
               var hooks = root["hooks"] as? [String: Any]
         else { return true }
 
-        for eventName in ["PermissionRequest", "Notification"] {
+        for eventName in ["PermissionRequest", "Notification", "PreToolUse", "PostToolUse"] {
             guard var entries = hooks[eventName] as? [[String: Any]] else { continue }
             entries.removeAll { entry in
                 ((entry["hooks"] as? [[String: Any]]) ?? [])

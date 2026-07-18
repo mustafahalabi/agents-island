@@ -516,23 +516,30 @@ private struct SessionCard: View {
         agent.status == .waiting && agent.terminalApp != nil && approval == nil
     }
 
+    /// Live question from the PreToolUse hook — the only real-time source
+    /// (the transcript records AskUserQuestion only after it's answered).
+    private var liveQuestion: PendingQuestion? { approvals.questions[agent.id]?.question }
+
+    /// A pending question/approval means "waiting on you" regardless of the
+    /// flickery CPU/registry status — pin the card's color to that.
+    private var effectiveStatus: AgentStatus {
+        (approval != nil || liveQuestion != nil) ? .waiting : agent.status
+    }
+
     /// A subtle wash of the status color behind the card (idle stays neutral).
     private var statusWash: Color {
-        switch agent.status {
-        case .working: return agent.status.color.opacity(hovered || selected ? 0.14 : 0.10)
-        case .waiting: return agent.status.color.opacity(hovered || selected ? 0.14 : 0.10)
-        case .idle:    return .clear
+        switch effectiveStatus {
+        case .working, .waiting: return effectiveStatus.color.opacity(hovered || selected ? 0.14 : 0.10)
+        case .idle:              return .clear
         }
     }
 
-    /// Border color: approval/selected win, otherwise a status tint.
+    /// Border color: selected wins, otherwise a status tint.
     private var borderColor: Color {
-        if approval != nil { return approvalColor.opacity(0.6) }
         if selected { return Color(red: 0.45, green: 0.62, blue: 1.0).opacity(0.8) }
-        switch agent.status {
-        case .working: return agent.status.color.opacity(0.4)
-        case .waiting: return agent.status.color.opacity(0.4)
-        case .idle:    return .white.opacity(0.07)
+        switch effectiveStatus {
+        case .working, .waiting: return effectiveStatus.color.opacity(0.4)
+        case .idle:              return .white.opacity(0.07)
         }
     }
 
@@ -602,8 +609,13 @@ private struct SessionCard: View {
                 if approval != nil {
                     approvalBar
                         .padding(.top, 3)
+                } else if let question = liveQuestion, agent.terminalApp != nil {
+                    // Structured question, live from the PreToolUse hook —
+                    // stays up until the answer lands (PostToolUse / busy).
+                    questionBar(question)
+                        .padding(.top, 3)
                 } else if canReply, hovered || selected {
-                    // Agent is asking / waiting → answer inline without leaving.
+                    // Free-text question → answer inline without leaving.
                     replyBar
                         .padding(.top, 3)
                 }
@@ -622,7 +634,7 @@ private struct SessionCard: View {
         .overlay(  // status-tinted left accent bar
             HStack(spacing: 0) {
                 RoundedRectangle(cornerRadius: 2)
-                    .fill(agent.status.color.opacity(agent.status == .idle ? 0.3 : 0.9))
+                    .fill(effectiveStatus.color.opacity(effectiveStatus == .idle ? 0.3 : 0.9))
                     .frame(width: 3)
                     .padding(.vertical, 10)
                 Spacer(minLength: 0)
@@ -706,6 +718,66 @@ private struct SessionCard: View {
         guard !text.isEmpty else { return }
         TerminalBridge.send(text: text, to: agent)
         replyText = ""
+        justSent = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { justSent = false }
+    }
+
+    /// A structured AskUserQuestion → one tappable button per option, plus a
+    /// free-text box for a custom ("Other") answer.
+    private func questionBar(_ question: PendingQuestion) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 5) {
+                Image(systemName: "questionmark.circle.fill")
+                    .font(.system(size: 10))
+                    .foregroundStyle(AgentStatus.waiting.color)
+                Text(question.prompt)
+                    .font(.system(size: fs, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.9))
+                    .lineLimit(2)
+                if question.multiSelect {
+                    Text("· pick any")
+                        .font(.system(size: fs - 2))
+                        .foregroundStyle(.white.opacity(0.4))
+                }
+            }
+            ForEach(Array(question.options.prefix(6).enumerated()), id: \.offset) { index, option in
+                Button { answerChoice(index + 1) } label: {
+                    HStack(spacing: 7) {
+                        Text("\(index + 1)")
+                            .font(.system(size: fs - 1, weight: .bold, design: .rounded))
+                            .foregroundStyle(AgentStatus.waiting.color)
+                            .frame(width: 16, height: 16)
+                            .background(Circle().fill(AgentStatus.waiting.color.opacity(0.18)))
+                        Text(option)
+                            .font(.system(size: fs))
+                            .foregroundStyle(.white.opacity(0.9))
+                            .lineLimit(1)
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(.white.opacity(0.06)))
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+            replyBar // "Other" — type a custom answer
+        }
+        .padding(8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 10, style: .continuous)
+            .fill(AgentStatus.waiting.color.opacity(0.10)))
+    }
+
+    /// Answer a choice: the digit selects the option in Claude's prompt and
+    /// Enter confirms it (TerminalBridge.send types text + Enter).
+    private func answerChoice(_ number: Int) {
+        ApprovalCenter.shared.clearQuestion(pid: agent.id)
+        DispatchQueue.global(qos: .userInitiated).async {
+            TerminalBridge.send(text: String(number), to: agent)
+        }
         justSent = true
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { justSent = false }
     }
