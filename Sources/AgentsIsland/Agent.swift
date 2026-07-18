@@ -61,11 +61,11 @@ enum AgentKind: String, CaseIterable {
         // Command names + aliases are the VERIFIED executable basenames — the
         // process shows up as the interpreter (node/python/bun) running one of
         // these, or as the native binary directly.
-        .qwen:        Meta(displayName: "Qwen",     rgb: (0.38, 0.36, 0.93), symbol: "diamond.fill",    iconFile: nil, aliases: ["qwen-code"]),
-        .kimi:        Meta(displayName: "Kimi",     rgb: (0.12, 0.12, 0.15), symbol: "moon.stars.fill", iconFile: nil, aliases: ["kimi-code"]),
-        .deepseek:    Meta(displayName: "DeepSeek", rgb: (0.30, 0.42, 1.00), symbol: "magnifyingglass", iconFile: nil, aliases: ["deepcode"]),
-        .grok:        Meta(displayName: "Grok",     rgb: (0.12, 0.12, 0.14), symbol: "x.circle.fill",   iconFile: nil, aliases: ["grok-cli"]),
-        .mistral:     Meta(displayName: "Mistral",  rgb: (0.98, 0.32, 0.06), symbol: "wind",            iconFile: nil, aliases: ["vibe", "mistral-vibe"]),
+        .qwen:        Meta(displayName: "Qwen",     rgb: (0.38, 0.36, 0.93), symbol: "diamond.fill",    iconFile: "qwen",     aliases: ["qwen-code"]),
+        .kimi:        Meta(displayName: "Kimi",     rgb: (0.12, 0.12, 0.15), symbol: "moon.stars.fill", iconFile: "kimi",     aliases: ["kimi-code"]),
+        .deepseek:    Meta(displayName: "DeepSeek", rgb: (0.30, 0.42, 1.00), symbol: "magnifyingglass", iconFile: "deepseek", aliases: ["deepcode"]),
+        .grok:        Meta(displayName: "Grok",     rgb: (0.12, 0.12, 0.14), symbol: "x.circle.fill",   iconFile: "grok",     aliases: ["grok-cli"]),
+        .mistral:     Meta(displayName: "Mistral",  rgb: (0.98, 0.32, 0.06), symbol: "wind",            iconFile: "mistral",  aliases: ["vibe", "mistral-vibe"]),
         .antigravity: Meta(displayName: "Antigravity", rgb: (0.26, 0.52, 0.96), symbol: "arrow.up.circle.fill", iconFile: nil, aliases: ["agy"]),
         .qoder:       Meta(displayName: "Qoder",    rgb: (0.36, 0.40, 0.95), symbol: "chevron.left.forwardslash.chevron.right", iconFile: nil, aliases: ["qodercli"]),
         .codebuddy:   Meta(displayName: "CodeBuddy", rgb: (0.20, 0.52, 0.92), symbol: "person.fill",    iconFile: nil, aliases: []),
