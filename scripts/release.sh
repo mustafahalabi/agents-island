@@ -88,6 +88,22 @@ fi
 echo "==> Building $TAG${SIGN_ID:+ signed as $SIGN_ID}"
 VERSION="$VERSION" SIGN_ID="$SIGN_ID" ./make-app.sh --no-launch
 
+# ---- Architecture gate -------------------------------------------------------
+# The README promises "Apple Silicon or Intel", but `swift build` without --arch
+# flags produces a binary for the build machine only. v0.3.0–v0.4.7 all shipped
+# arm64-only, so Intel users could not launch the app at all. A thin binary is
+# not a degraded release, it is an unusable one for half the audience.
+ARCHS=$(lipo -archs dist/AgentsIsland.app/Contents/MacOS/AgentsIsland 2>/dev/null || echo "")
+case "$ARCHS" in
+    *arm64*x86_64*|*x86_64*arm64*)
+        echo "    ✓ universal binary ($ARCHS)" ;;
+    *)
+        echo "FATAL: the built binary is not universal (found: ${ARCHS:-unknown})." >&2
+        echo "       Intel Macs cannot run it, and the README says they can." >&2
+        echo "       Did NATIVE_ONLY=1 leak into this build?" >&2
+        exit 1 ;;
+esac
+
 # ---- Notarize + staple -------------------------------------------------------
 if [ -n "$SIGN_ID" ]; then
     echo "==> Notarizing (this usually takes 1–5 minutes)…"

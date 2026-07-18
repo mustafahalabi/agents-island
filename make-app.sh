@@ -5,6 +5,7 @@
 #   ./make-app.sh              build → dist/AgentsIsland.app → launch
 #   ./make-app.sh --install    also copy to /Applications and launch from there
 #   ./make-app.sh --no-launch  build only (CI / packaging)
+#   NATIVE_ONLY=1 ./make-app.sh   faster build, this Mac's arch only (not releasable)
 #   VERSION=1.2.0 ./make-app.sh   stamp a version into Info.plist
 #   SIGN_ID="Developer ID Application: …" ./make-app.sh
 #                              sign with hardened runtime (notarizable);
@@ -29,17 +30,32 @@ fi
 # and needs no separate hosting.
 SPARKLE_FEED_URL="${SPARKLE_FEED_URL:-https://github.com/mustafahalabi/agents-island/releases/latest/download/appcast.xml}"
 
-swift build -c release
+# Universal by default. `swift build` alone produces a binary for the build
+# machine's architecture only, which on Apple Silicon means arm64 — and an
+# arm64 binary does not run on Intel at all (Rosetta translates x86 to arm, not
+# the reverse). Every release up to and including v0.4.7 shipped arm64-only
+# while the README promised "Apple Silicon or Intel".
+#
+# NATIVE_ONLY=1 skips the second slice for a faster local build; never use it
+# for a release (scripts/release.sh rejects a thin binary).
+if [ "${NATIVE_ONLY:-0}" = 1 ]; then
+    swift build -c release
+    PRODUCTS=".build/release"
+else
+    swift build -c release --arch arm64 --arch x86_64
+    # Multi-arch builds land somewhere else entirely.
+    PRODUCTS=".build/apple/Products/Release"
+fi
 
 APP="dist/AgentsIsland.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Frameworks"
 
-cp .build/release/AgentsIsland "$APP/Contents/MacOS/AgentsIsland"
+cp "$PRODUCTS/AgentsIsland" "$APP/Contents/MacOS/AgentsIsland"
 
 # Sparkle.framework — ditto, not cp, so the Versions/Current symlink farm
 # survives; a flattened framework fails codesign's bundle-format check.
-ditto .build/release/Sparkle.framework "$APP/Contents/Frameworks/Sparkle.framework"
+ditto $PRODUCTS/Sparkle.framework "$APP/Contents/Frameworks/Sparkle.framework"
 
 # SwiftPM links Sparkle as @rpath/... but only bakes in @loader_path, which
 # points at Contents/MacOS. Without this the app dies at launch with a dyld
@@ -47,7 +63,7 @@ ditto .build/release/Sparkle.framework "$APP/Contents/Frameworks/Sparkle.framewo
 install_name_tool -add_rpath "@executable_path/../Frameworks" \
     "$APP/Contents/MacOS/AgentsIsland" 2>/dev/null || true
 # SPM resource bundle (agent brand icons) — Bundle.module finds it in Resources.
-cp -R .build/release/AgentsIsland_AgentsIsland.bundle "$APP/Contents/Resources/" 2>/dev/null || true
+cp -R $PRODUCTS/AgentsIsland_AgentsIsland.bundle "$APP/Contents/Resources/" 2>/dev/null || true
 cp assets/AppIcon.icns "$APP/Contents/Resources/" 2>/dev/null || true
 
 cat > "$APP/Contents/Info.plist" <<EOF
