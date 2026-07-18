@@ -3,6 +3,10 @@
 Thanks for taking the time to contribute. This is a native macOS SwiftUI app with
 no build system beyond SwiftPM, so getting started is short.
 
+Agents Island is maintained by [@mustafahalabi](https://github.com/mustafahalabi)
+(Mustafa Halabi) and [@Mhmdhammoud](https://github.com/Mhmdhammoud) (Mohammad
+Hammoud). Both are code owners, so either can review and merge.
+
 ## Ground rules
 
 - `main` is protected. Nobody pushes to it directly — every change lands through a
@@ -88,6 +92,6 @@ that write nothing readable are not, however popular they are.
 
 ## Release process
 
-Releases are cut locally by the maintainer with `scripts/release.sh` — signing
+Releases are cut locally by a maintainer with `scripts/release.sh` — signing
 and notarization need a Developer ID certificate that can't live in CI. You don't
 need to touch versioning in your PR.

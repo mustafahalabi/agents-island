@@ -165,7 +165,7 @@ third-party dependencies, nothing leaves your machine).
 
 ## License
 
-[MIT](LICENSE) © Mustafa Halabi
+[MIT](LICENSE) © Mustafa Halabi and Mohammad Hammoud
 
 ---
 
