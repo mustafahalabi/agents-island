@@ -328,29 +328,58 @@ private struct UsageHeaderChip: View {
     @AppStorage(Pref.usageEnabled) private var enabled = true
     @AppStorage(Pref.usagePlan) private var plan = "max5x"
 
+    private var hasClaude: Bool { tracker.snapshot.weekTokens > 0 }
+    private var hasCodex: Bool { tracker.codex.hasData }
+
     var body: some View {
-        if enabled, tracker.snapshot.weekTokens > 0 {
-            let budgets = UsageTracker.budgets(plan: plan)
-            let snapshot = tracker.snapshot
-            HStack(spacing: 7) {
-                if let blockPercent = snapshot.blockPercent(budget: budgets.block),
-                   let reset = snapshot.blockResetAt {
-                    Text("5h")
-                        .foregroundStyle(.white.opacity(0.35))
-                    Text("\(min(blockPercent, 999))%")
-                        .foregroundStyle(color(for: blockPercent))
-                    Text("⟳ \(countdown(to: reset))")
-                        .foregroundStyle(.white.opacity(0.35))
-                    Text("·").foregroundStyle(.white.opacity(0.2))
+        if enabled, hasClaude || hasCodex {
+            HStack(spacing: 8) {
+                if hasClaude { claudeSegment }
+                if hasClaude, hasCodex {
+                    Rectangle().fill(.white.opacity(0.12)).frame(width: 1, height: 9)
                 }
-                Text("7d")
-                    .foregroundStyle(.white.opacity(0.35))
-                Text("\(min(snapshot.weekPercent(budget: budgets.week), 999))%")
-                    .foregroundStyle(color(for: snapshot.weekPercent(budget: budgets.week)))
+                if hasCodex { codexSegment }
             }
             .font(.system(size: 10, weight: .semibold, design: .rounded))
-            .help("Estimated Claude usage — configure in Settings → Usage")
         }
+    }
+
+    /// Claude — estimated from transcripts (brand-orange dot).
+    private var claudeSegment: some View {
+        let budgets = UsageTracker.budgets(plan: plan)
+        let snapshot = tracker.snapshot
+        return HStack(spacing: 5) {
+            Circle().fill(AgentKind.claude.color).frame(width: 5, height: 5)
+            if let blockPercent = snapshot.blockPercent(budget: budgets.block),
+               let reset = snapshot.blockResetAt {
+                label("5h"); percent(blockPercent)
+                Text("⟳\(countdown(to: reset))").foregroundStyle(.white.opacity(0.35))
+            }
+            label("7d"); percent(snapshot.weekPercent(budget: budgets.week))
+        }
+        .help("Estimated Claude usage — Settings → Usage")
+    }
+
+    /// Codex — exact, from its own rate-limit reports (brand-green dot).
+    private var codexSegment: some View {
+        HStack(spacing: 5) {
+            Circle().fill(AgentKind.codex.color).frame(width: 5, height: 5)
+            if let secondary = tracker.codex.secondary {
+                label(secondary.label); percent(Int(secondary.usedPercent.rounded()))
+            }
+            if let primary = tracker.codex.primary {
+                label(primary.label); percent(Int(primary.usedPercent.rounded()))
+            }
+        }
+        .help("Codex usage — exact, from ~/.codex")
+    }
+
+    private func label(_ text: String) -> some View {
+        Text(text).foregroundStyle(.white.opacity(0.35))
+    }
+
+    private func percent(_ value: Int) -> some View {
+        Text("\(min(value, 999))%").foregroundStyle(color(for: value))
     }
 
     private func color(for percent: Int) -> Color {
