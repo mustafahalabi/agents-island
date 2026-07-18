@@ -20,15 +20,39 @@ APP="dist/AgentsIsland.app"
 VOL="Agents Island"
 DMG="AgentsIsland-${VERSION}.dmg"
 
+# `notarytool submit --wait` exits 0 once processing finishes — including on an
+# Invalid verdict — so the status has to be read back rather than inferred from
+# the exit code, and the ticket confirmed on disk afterwards.
+# notarize_or_die <submit_path> [staple_path]
+# An .app is submitted as a zip but stapled on the bundle itself, so the two
+# paths differ there; for a DMG they are the same file.
+notarize_or_die() {
+    local submit="$1" staple="${2:-$1}" out status sub_id
+    out=$(xcrun notarytool submit "$submit" \
+        --keychain-profile "$NOTARY_PROFILE" --wait 2>&1) || true
+    echo "$out"
+    status=$(echo "$out" | awk '$1=="status:" {s=$2} END {print s}')
+    if [ "$status" != "Accepted" ]; then
+        echo "FATAL: notarization of $submit failed (status: ${status:-unknown})." >&2
+        sub_id=$(echo "$out" | awk '/^ *id:/ {print $2; exit}')
+        [ -n "$sub_id" ] && echo "       xcrun notarytool log $sub_id --keychain-profile $NOTARY_PROFILE" >&2
+        exit 1
+    fi
+    xcrun stapler staple "$staple"
+    xcrun stapler validate "$staple" >/dev/null 2>&1 || {
+        echo "FATAL: $staple has no stapled ticket after stapling." >&2; exit 1; }
+}
+
 # ---- Build the app unless told to reuse the existing bundle ----------------
 if [ "${1:-}" != "--no-build" ]; then
     VERSION="$VERSION" SIGN_ID="${SIGN_ID:-}" ./make-app.sh --no-launch
 fi
 [ -d "$APP" ] || { echo "error: $APP not found — run without --no-build"; exit 1; }
 
-# ---- Notarization is optional: only if a Developer ID cert AND a stored
-#      notary profile are both present. Otherwise we ship signed-but-unnotarized
-#      (better than ad-hoc; users still get one Gatekeeper prompt on download).
+# ---- Notarization requires a Developer ID cert AND a stored notary profile.
+#      Signed-but-unnotarized is NOT a milder middle ground: macOS blocks the
+#      app and moves it to the Trash, so that combination now aborts unless
+#      ALLOW_UNNOTARIZED=1 marks the build as deliberately local-only.
 NOTARY_PROFILE="${NOTARY_PROFILE:-agents-island}"
 HAVE_NOTARY=0
 if [ -n "${SIGN_ID:-}" ] && xcrun notarytool history --keychain-profile "$NOTARY_PROFILE" >/dev/null 2>&1; then
@@ -40,12 +64,22 @@ if [ "$HAVE_NOTARY" = 1 ] && xcrun stapler validate "$APP" >/dev/null 2>&1; then
 elif [ "$HAVE_NOTARY" = 1 ]; then
     echo "==> Notarizing the app…"
     ditto -c -k --norsrc --noextattr --noacl --keepParent "$APP" /tmp/ai-app-notarize.zip
-    xcrun notarytool submit /tmp/ai-app-notarize.zip \
-        --keychain-profile "$NOTARY_PROFILE" --wait
-    xcrun stapler staple "$APP"
+    notarize_or_die /tmp/ai-app-notarize.zip "$APP"
     rm -f /tmp/ai-app-notarize.zip
 elif [ -n "${SIGN_ID:-}" ]; then
-    echo "==> Signed with Developer ID but no notary profile '$NOTARY_PROFILE' — skipping notarization."
+    # A Developer ID signature without a notarization ticket is NOT a milder
+    # warning — macOS refuses to launch the app and moves it to the Trash.
+    # Silently taking this path is how 0.3.0–0.4.5 shipped broken, so it now
+    # requires saying so out loud.
+    echo "Signed with Developer ID but notary profile '$NOTARY_PROFILE' is unavailable." >&2
+    if [ "${ALLOW_UNNOTARIZED:-0}" != 1 ]; then
+        echo "FATAL: refusing to build a signed-but-unnotarized DMG — Gatekeeper" >&2
+        echo "       blocks it and macOS deletes the app on first launch." >&2
+        echo "       Check 'xcrun notarytool history --keychain-profile $NOTARY_PROFILE'," >&2
+        echo "       or set ALLOW_UNNOTARIZED=1 for a deliberate local-only build." >&2
+        exit 1
+    fi
+    echo "==> WARNING: ALLOW_UNNOTARIZED=1 — this DMG must NOT be published."
 fi
 
 # ---- Build the DMG ---------------------------------------------------------
@@ -83,12 +117,11 @@ if [ -n "${SIGN_ID:-}" ]; then
 fi
 if [ "$HAVE_NOTARY" = 1 ]; then
     echo "==> Notarizing the DMG…"
-    xcrun notarytool submit "$DMG" --keychain-profile "$NOTARY_PROFILE" --wait
-    xcrun stapler staple "$DMG"
+    notarize_or_die "$DMG"
 fi
 
 shasum -a 256 "$DMG"
 STATE="ad-hoc (right-click → Open)"
-[ -n "${SIGN_ID:-}" ] && STATE="Developer ID signed (one Gatekeeper prompt on download)"
+[ -n "${SIGN_ID:-}" ] && STATE="Developer ID signed but UNNOTARIZED — Gatekeeper will block this; do not publish"
 [ "$HAVE_NOTARY" = 1 ] && STATE="signed & notarized (opens cleanly)"
 echo "==> Built $DMG ($(du -h "$DMG" | cut -f1)) — $STATE"
