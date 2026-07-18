@@ -31,6 +31,7 @@ run "AgentDetectionTests" "$TMP/detection" \
 
 run "QuestionParseTests" "$TMP/question" \
     Sources/AgentsIsland/Agent.swift \
+    Sources/AgentsIsland/TailRead.swift \
     Sources/AgentsIsland/ClaudeSessions.swift \
     scripts/tests/QuestionParseTests.swift
 
@@ -39,6 +40,21 @@ run "QuestionParseTests" "$TMP/question" \
 run "InstallChannelTests" "$TMP/install" \
     Sources/AgentsIsland/InstallChannel.swift \
     scripts/tests/InstallChannelTests.swift
+
+# The three files below are likewise dependency-free on purpose: each holds
+# logic that used to sit inline in a file too entangled to test, and each was
+# extracted because it was silently losing user data.
+run "TailReadTests" "$TMP/tail" \
+    Sources/AgentsIsland/TailRead.swift \
+    scripts/tests/TailReadTests.swift
+
+run "ProcessNamingTests" "$TMP/procname" \
+    Sources/AgentsIsland/ProcessNaming.swift \
+    scripts/tests/ProcessNamingTests.swift
+
+run "HookSettingsTests" "$TMP/hooks" \
+    Sources/AgentsIsland/HookSettings.swift \
+    scripts/tests/HookSettingsTests.swift
 
 if [ "$fail" = 0 ]; then
     echo "✅ all test suites passed"

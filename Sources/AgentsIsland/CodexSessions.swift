@@ -338,11 +338,10 @@ enum CodexSessions {
         let size = (try? handle.seekToEnd()) ?? 0
         let offset = size > UInt64(bytes) ? size - UInt64(bytes) : 0
         try? handle.seek(toOffset: offset)
-        guard let data = try? handle.readToEnd(),
-              let text = String(data: data, encoding: .utf8) else { return [] }
+        guard let data = try? handle.readToEnd() else { return [] }
 
-        var lines = text.split(separator: "\n", omittingEmptySubsequences: true)
-        if offset > 0, !lines.isEmpty { lines.removeFirst() } // partial line
+        // Lossy on purpose — the window can begin mid-character. See TailRead.
+        let lines = TailRead.lines(data, dropsFirstLine: offset > 0)
 
         return lines.compactMap { line in
             (try? JSONSerialization.jsonObject(with: Data(line.utf8))) as? [String: Any]

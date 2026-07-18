@@ -244,15 +244,13 @@ enum ClaudeSessions {
             startsMidLine = (try? handle.read(upToCount: 1))?.first != UInt8(ascii: "\n")
         }
         try? handle.seek(toOffset: offset)
-        guard let data = try? handle.readToEnd(),
-              let text = String(data: data, encoding: .utf8) else { return [] }
+        guard let data = try? handle.readToEnd() else { return [] }
 
-        var lines = text.split(separator: "\n", omittingEmptySubsequences: true)
-        if startsMidLine, !lines.isEmpty { lines.removeFirst() }
+        // Lossy on purpose — the window can begin mid-character. See TailRead.
+        let lines = TailRead.lines(data, dropsFirstLine: startsMidLine)
 
         return lines.compactMap { line in
-            guard let data = line.data(using: .utf8) else { return nil }
-            return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+            (try? JSONSerialization.jsonObject(with: Data(line.utf8))) as? [String: Any]
         }
     }
 
