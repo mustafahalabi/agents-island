@@ -505,10 +505,36 @@ private struct SessionCard: View {
     @AppStorage(Pref.contentFontSize) private var fontSize = 11
     @ObservedObject private var approvals = ApprovalCenter.shared
     @State private var hovered = false
+    @State private var replyText = ""
+    @State private var justSent = false
 
     private var fs: CGFloat { CGFloat(fontSize) }
     private var approval: ApprovalCenter.Approval? { approvals.pending[agent.id] }
     private var approvalColor: Color { AgentStatus.waiting.color }
+    /// The agent is waiting on you and we can type back into its terminal.
+    private var canReply: Bool {
+        agent.status == .waiting && agent.terminalApp != nil && approval == nil
+    }
+
+    /// A subtle wash of the status color behind the card (idle stays neutral).
+    private var statusWash: Color {
+        switch agent.status {
+        case .working: return agent.status.color.opacity(hovered || selected ? 0.14 : 0.10)
+        case .waiting: return agent.status.color.opacity(hovered || selected ? 0.14 : 0.10)
+        case .idle:    return .clear
+        }
+    }
+
+    /// Border color: approval/selected win, otherwise a status tint.
+    private var borderColor: Color {
+        if approval != nil { return approvalColor.opacity(0.6) }
+        if selected { return Color(red: 0.45, green: 0.62, blue: 1.0).opacity(0.8) }
+        switch agent.status {
+        case .working: return agent.status.color.opacity(0.4)
+        case .waiting: return agent.status.color.opacity(0.4)
+        case .idle:    return .white.opacity(0.07)
+        }
+    }
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
@@ -538,8 +564,14 @@ private struct SessionCard: View {
                         .fixedSize()
                 }
 
-                // Line 2: the user's last message
-                if showLastPrompt, let prompt = agent.lastPrompt {
+                // Line 2: when the agent is waiting on you, surface its question;
+                // otherwise show your last message.
+                if agent.status == .waiting, let question = agent.lastMessage, approval == nil {
+                    Text(question)
+                        .font(.system(size: fs))
+                        .foregroundStyle(.white.opacity(0.72))
+                        .lineLimit(3)
+                } else if showLastPrompt, let prompt = agent.lastPrompt {
                     Text("You: \(prompt)")
                         .font(.system(size: fs))
                         .foregroundStyle(.white.opacity(0.45))
@@ -566,9 +598,13 @@ private struct SessionCard: View {
                         .padding(.top, 3)
                 }
 
-                // Pending permission request → answer from the island
+                // Pending permission request → answer from the island.
                 if approval != nil {
                     approvalBar
+                        .padding(.top, 3)
+                } else if canReply, hovered || selected {
+                    // Agent is asking / waiting → answer inline without leaving.
+                    replyBar
                         .padding(.top, 3)
                 }
             }
@@ -577,16 +613,24 @@ private struct SessionCard: View {
         .padding(.horizontal, 12)
         .background(
             RoundedRectangle(cornerRadius: 15, style: .continuous)
-                .fill(.white.opacity(selected ? 0.11 : hovered ? 0.09 : agent.status == .working ? 0.06 : 0.04))
+                .fill(.white.opacity(selected ? 0.08 : hovered ? 0.06 : 0.03))
+                .overlay(  // a wash of the status color so the card reads at a glance
+                    RoundedRectangle(cornerRadius: 15, style: .continuous)
+                        .fill(statusWash)
+                )
+        )
+        .overlay(  // status-tinted left accent bar
+            HStack(spacing: 0) {
+                RoundedRectangle(cornerRadius: 2)
+                    .fill(agent.status.color.opacity(agent.status == .idle ? 0.3 : 0.9))
+                    .frame(width: 3)
+                    .padding(.vertical, 10)
+                Spacer(minLength: 0)
+            }
         )
         .overlay(
             RoundedRectangle(cornerRadius: 15, style: .continuous)
-                .strokeBorder(
-                    approval != nil ? approvalColor.opacity(0.55)
-                        : selected ? Color(red: 0.45, green: 0.62, blue: 1.0).opacity(0.8)
-                        : .white.opacity(0.06),
-                    lineWidth: selected || approval != nil ? 1.5 : 1
-                )
+                .strokeBorder(borderColor, lineWidth: selected || approval != nil ? 1.5 : 1)
         )
         .onHover { inside in
             hovered = inside
@@ -624,6 +668,46 @@ private struct SessionCard: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: 10, style: .continuous)
             .fill(approvalColor.opacity(0.10)))
+    }
+
+    /// Answer the agent's question straight into its terminal, without opening
+    /// the detail view or switching to the terminal.
+    private var replyBar: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "arrowshape.turn.up.left.fill")
+                .font(.system(size: 10))
+                .foregroundStyle(AgentStatus.waiting.color)
+            TextField("Answer \(agent.kind.displayName)…", text: $replyText)
+                .textFieldStyle(.plain)
+                .font(.system(size: fs))
+                .foregroundStyle(.white)
+                .onSubmit(sendReply)
+            Button(action: sendReply) {
+                Image(systemName: justSent ? "checkmark.circle.fill" : "arrow.up.circle.fill")
+                    .font(.system(size: 16))
+                    .foregroundStyle(justSent ? AgentStatus.working.color
+                        : replyText.trimmingCharacters(in: .whitespaces).isEmpty
+                            ? .white.opacity(0.3)
+                            : Color(red: 0.45, green: 0.62, blue: 1.0))
+            }
+            .buttonStyle(.plain)
+            .disabled(replyText.trimmingCharacters(in: .whitespaces).isEmpty)
+        }
+        .padding(.horizontal, 9)
+        .padding(.vertical, 6)
+        .background(RoundedRectangle(cornerRadius: 10, style: .continuous)
+            .fill(AgentStatus.waiting.color.opacity(0.10)))
+        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
+            .strokeBorder(AgentStatus.waiting.color.opacity(0.25), lineWidth: 1))
+    }
+
+    private func sendReply() {
+        let text = replyText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        TerminalBridge.send(text: text, to: agent)
+        replyText = ""
+        justSent = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { justSent = false }
     }
 
     /// Chips drop least-important-first when the row runs out of width, so

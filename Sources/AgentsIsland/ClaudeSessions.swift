@@ -17,6 +17,7 @@ enum ClaudeSessions {
     struct TranscriptInfo: Equatable {
         var title: String?
         var lastPrompt: String?
+        var lastMessage: String?   // the assistant's most recent text — the question when waiting
         var activity: String?
         var model: String?
         var todos: [Todo] = []
@@ -113,6 +114,12 @@ enum ClaudeSessions {
                    let model = message["model"] as? String, !model.isEmpty {
                     info.model = model
                 }
+                let assistantText = contentItems(obj)
+                    .filter { $0["type"] as? String == "text" }
+                    .compactMap { $0["text"] as? String }
+                    .joined(separator: "\n")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                if !assistantText.isEmpty { info.lastMessage = assistantText }
                 for item in contentItems(obj) {
                     if item["type"] as? String == "tool_use",
                        let id = item["id"] as? String,

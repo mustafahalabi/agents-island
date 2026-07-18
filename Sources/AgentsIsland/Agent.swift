@@ -107,6 +107,7 @@ struct AgentSession: Identifiable, Equatable {
     // Rich fields (Claude Code sessions, via ~/.claude)
     var title: String?
     var lastPrompt: String?
+    var lastMessage: String?   // the agent's last message — the question it's asking when waiting
     var activity: String?      // e.g. "Writing middleware.ts"
     var transcriptPath: String?
     var model: String?         // raw model id from the transcript, e.g. "claude-opus-4-8"

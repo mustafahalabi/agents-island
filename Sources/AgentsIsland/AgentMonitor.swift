@@ -161,6 +161,7 @@ final class AgentMonitor: ObservableObject {
                 // title, then fall back to the clean cwd basename in the view.
                 session.title = info.title
                 session.lastPrompt = info.lastPrompt
+                session.lastMessage = info.lastMessage
                 session.model = info.model
                 session.subagents = info.subagents
                 session.plan = info.plan
