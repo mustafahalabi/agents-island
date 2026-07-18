@@ -59,25 +59,33 @@ ditto -c -k --norsrc --noextattr --noacl --keepParent dist/AgentsIsland.app Agen
 shasum -a 256 AgentsIsland.zip > AgentsIsland.zip.sha256
 SHA=$(cut -d' ' -f1 < AgentsIsland.zip.sha256)
 
+# Drag-to-install .dmg, built from the app we just notarized+stapled above
+# (make-dmg reuses the stapled app, then signs + notarizes + staples the DMG).
+DMG="AgentsIsland-${VERSION}.dmg"
+VERSION="$VERSION" SIGN_ID="$SIGN_ID" NOTARY_PROFILE="$NOTARY_PROFILE" \
+    ./scripts/make-dmg.sh --no-build
+shasum -a 256 "$DMG" > "$DMG.sha256"
+
 # ---- Tag + GitHub release -------------------------------------------------------
 echo "==> Tagging and releasing $TAG"
 git tag "$TAG" 2>/dev/null || echo "    (tag exists, reusing)"
 git push origin "$TAG"
 
 if [ -n "$SIGN_ID" ]; then
-    NOTES="Signed and notarized — download, unzip, drag to /Applications. Or:
+    NOTES="Signed and notarized. Download **$DMG**, open it, and drag Agents Island to Applications. Or:
 \`\`\`sh
 brew install --cask mustafahalabi/tap/agents-island
 \`\`\`"
 else
-    NOTES="Unsigned build — right-click → Open the first time, or use:
+    NOTES="Unsigned build — open the .dmg, drag to Applications, then right-click → Open the first time. Or:
 \`\`\`sh
 curl -fsSL https://raw.githubusercontent.com/mustafahalabi/agents-island/main/install.sh | bash
 \`\`\`"
 fi
-gh release create "$TAG" AgentsIsland.zip AgentsIsland.zip.sha256 \
+gh release create "$TAG" \
+    "$DMG" "$DMG.sha256" AgentsIsland.zip AgentsIsland.zip.sha256 \
     --title "Agents Island $TAG" --generate-notes --notes "$NOTES"
-rm -f AgentsIsland.zip AgentsIsland.zip.sha256
+rm -f AgentsIsland.zip AgentsIsland.zip.sha256 "$DMG" "$DMG.sha256"
 
 # ---- Bump the Homebrew cask ------------------------------------------------------
 echo "==> Bumping cask to $VERSION ($SHA)"

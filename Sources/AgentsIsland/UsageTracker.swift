@@ -32,7 +32,29 @@ final class UsageTracker: ObservableObject {
         }
     }
 
+    /// Codex reports its real server-side rate limits in each rollout's
+    /// `token_count` events — no estimation needed, we surface them verbatim.
+    struct CodexWindow: Equatable {
+        var usedPercent: Double
+        var resetsAt: Date?
+        var windowMinutes: Int
+        /// "5h" / "7d" style label derived from the window length.
+        var label: String {
+            if windowMinutes % 1440 == 0 { return "\(windowMinutes / 1440)d" }
+            if windowMinutes % 60 == 0 { return "\(windowMinutes / 60)h" }
+            return "\(windowMinutes)m"
+        }
+    }
+
+    struct CodexSnapshot: Equatable {
+        var primary: CodexWindow?
+        var secondary: CodexWindow?
+        var planType: String?
+        var hasData: Bool { primary != nil || secondary != nil }
+    }
+
     @Published private(set) var snapshot = Snapshot()
+    @Published private(set) var codex = CodexSnapshot()
 
     /// Per-file incremental state: transcripts are append-only, so after the
     /// first full parse we only read new bytes.
@@ -92,6 +114,71 @@ final class UsageTracker: ObservableObject {
         files = files.filter { seen.contains($0.key) }
 
         publish()
+        recomputeCodex()
+    }
+
+    // MARK: - Codex (exact server rate limits from ~/.codex rollouts)
+
+    private func recomputeCodex() {
+        guard let url = latestCodexRollout() else { return }
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return }
+        defer { try? handle.close() }
+        // Rate-limit events are small and near the end; the last 128KB is plenty.
+        let size = (try? handle.seekToEnd()) ?? 0
+        try? handle.seek(toOffset: size > 131_072 ? size - 131_072 : 0)
+        guard let data = try? handle.readToEnd(),
+              let text = String(data: data, encoding: .utf8) else { return }
+
+        var rate: [String: Any]?
+        for line in text.split(separator: "\n") where line.contains("\"rate_limits\"") {
+            guard let obj = (try? JSONSerialization.jsonObject(with: Data(line.utf8))) as? [String: Any],
+                  let payload = obj["payload"] as? [String: Any],
+                  let rl = payload["rate_limits"] as? [String: Any] else { continue }
+            rate = rl // keep the last (freshest) one
+        }
+        guard let rate else { return }
+
+        func window(_ key: String) -> CodexWindow? {
+            guard let w = rate[key] as? [String: Any],
+                  let pct = (w["used_percent"] as? NSNumber)?.doubleValue,
+                  let mins = (w["window_minutes"] as? NSNumber)?.intValue else { return nil }
+            let reset = (w["resets_at"] as? NSNumber).map { Date(timeIntervalSince1970: $0.doubleValue) }
+            return CodexWindow(usedPercent: pct, resetsAt: reset, windowMinutes: mins)
+        }
+
+        let next = CodexSnapshot(
+            primary: window("primary"),
+            secondary: window("secondary"),
+            planType: rate["plan_type"] as? String
+        )
+        DispatchQueue.main.async {
+            if self.codex != next { self.codex = next }
+        }
+    }
+
+    /// The most recently modified rollout under ~/.codex/sessions. We scan the
+    /// latest month's day folders (not just today's) by mtime, so an empty
+    /// current-day folder or a session that spans midnight still resolves.
+    private func latestCodexRollout() -> URL? {
+        let fm = FileManager.default
+        func children(_ dir: String) -> [String] {
+            ((try? fm.contentsOfDirectory(atPath: dir)) ?? [])
+                .filter { !$0.hasPrefix(".") }.sorted()
+        }
+        let base = Self.home + "/.codex/sessions"
+        guard let year = children(base).last.map({ base + "/" + $0 }),
+              let month = children(year).last.map({ year + "/" + $0 }) else { return nil }
+
+        var newest: (path: String, mtime: Date)?
+        for day in children(month) {
+            let dayDir = month + "/" + day
+            for file in children(dayDir) where file.hasPrefix("rollout-") && file.hasSuffix(".jsonl") {
+                let path = dayDir + "/" + file
+                guard let m = (try? fm.attributesOfItem(atPath: path))?[.modificationDate] as? Date else { continue }
+                if newest == nil || m > newest!.mtime { newest = (path, m) }
+            }
+        }
+        return newest.map { URL(fileURLWithPath: $0.path) }
     }
 
     /// Parse appended bytes into hourly weighted-token buckets.

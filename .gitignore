@@ -4,3 +4,7 @@ dist/
 *.xcodeproj
 DerivedData/
 .DS_Store
+
+# Release artifacts
+AgentsIsland-*.dmg
+AgentsIsland.zip*

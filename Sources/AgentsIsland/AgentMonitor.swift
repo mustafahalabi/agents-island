@@ -34,12 +34,23 @@ final class AgentMonitor: ObservableObject {
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.reschedule()
+
+                // Record that a scan completed *before* the unchanged-list
+                // early-return, so launching with zero agents still counts as
+                // the first scan — otherwise the first agent to appear later
+                // would be mistaken for "already running" and never post
+                // .agentStarted / its start sound.
+                let firstScan = !self.hasScannedOnce
+                self.hasScannedOnce = true
                 guard self.agents != found else { return }
 
-                let previous = Dictionary(uniqueKeysWithValues: self.agents.map { ($0.id, $0.status) })
+                // uniquingKeysWith (not the trapping uniqueKeysWithValues):
+                // remote synthetic ids are hashed and could, in theory, collide.
+                let previous = Dictionary(self.agents.map { ($0.id, $0.status) },
+                                          uniquingKeysWith: { first, _ in first })
                 // Suppress lifecycle events on the very first scan — everything
                 // already running would otherwise "start" at once.
-                if self.hasScannedOnce {
+                if !firstScan {
                     for session in found {
                         switch (previous[session.id], session.status) {
                         case (nil, _):
@@ -53,7 +64,6 @@ final class AgentMonitor: ObservableObject {
                         }
                     }
                 }
-                self.hasScannedOnce = true
                 self.agents = found
                 ApprovalCenter.shared.sync(agents: found)
             }
@@ -86,7 +96,7 @@ final class AgentMonitor: ObservableObject {
             let tty = parts[3] == "??" ? nil : String(parts[3])
             let args = String(parts[5])
             procs[pid] = ProcInfo(ppid: ppid, command: String(args.split(separator: " ").first ?? ""))
-            if let kind = detect(args: args), !disabled.contains(kind) {
+            if let kind = detect(args: args), !disabled.contains(kind), !isHeadless(tty: tty, args: args) {
                 candidates.append((pid, ppid, cpu, tty, String(parts[4]), args, kind))
             }
         }
@@ -216,6 +226,19 @@ final class AgentMonitor: ObservableObject {
         case .waiting: return 1
         case .idle: return 2
         }
+    }
+
+    /// Background / programmatic agents: no controlling terminal AND driven over
+    /// a piped protocol (`stream-json`) or in print mode (`-p` / `--print`).
+    /// These are SDK / orchestrator runs (e.g. FleetView sessions under
+    /// ~/.slock/agents) — the island can neither jump to nor reply into them, and
+    /// counting them inflates the session badge with sessions the user never
+    /// opened in a terminal. Interactive agents always own a pty, so a live tty
+    /// keeps them visible.
+    private static func isHeadless(tty: String?, args: String) -> Bool {
+        guard tty == nil else { return false }
+        if args.contains("stream-json") || args.contains("--print") { return true }
+        return args.split(separator: " ").contains("-p")
     }
 
     /// Model from the command line: `-m x`, `--model x`, or `--model=x`.
