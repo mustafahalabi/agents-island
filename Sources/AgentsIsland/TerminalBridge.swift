@@ -46,6 +46,14 @@ enum TerminalBridge {
                 end repeat
             end tell
             """)
+        case "WezTerm":
+            guard let dev, let wez = weztermPath, let pane = weztermPaneId(dev: dev) else { return false }
+            _ = run(wez, ["cli", "send-text", "--pane-id", pane, "--no-paste", trimmed + "\n"])
+            return true
+        case "kitty":
+            guard let kitten = kittenPath, let win = kittyWindowId(pid: agent.id) else { return false }
+            _ = run(kitten, ["@", "send-text", "--match", "id:\(win)", trimmed + "\n"])
+            return true
         case .some(let app):
             // Generic: bring the terminal forward and type. Goes to the
             // frontmost window of that app — approximate but broad.
@@ -103,6 +111,16 @@ enum TerminalBridge {
                 end repeat
             end tell
             """)
+        case "WezTerm":
+            if let dev, let wez = weztermPath, let pane = weztermPaneId(dev: dev) {
+                _ = run(wez, ["cli", "activate-pane", "--pane-id", pane])
+            }
+            osascript("tell application \"WezTerm\" to activate")
+        case "kitty":
+            if let kitten = kittenPath, let win = kittyWindowId(pid: agent.id) {
+                _ = run(kitten, ["@", "focus-window", "--match", "id:\(win)"])
+            }
+            osascript("tell application \"kitty\" to activate")
         case .some(let app):
             osascript("tell application \"\(app)\" to activate")
         case nil:
@@ -137,6 +155,14 @@ enum TerminalBridge {
                 end repeat
             end tell
             """)
+        case "WezTerm":
+            guard let dev, let wez = weztermPath, let pane = weztermPaneId(dev: dev) else { return false }
+            _ = run(wez, ["cli", "send-text", "--pane-id", pane, "--no-paste", key])
+            return true
+        case "kitty":
+            guard let kitten = kittenPath, let win = kittyWindowId(pid: agent.id) else { return false }
+            _ = run(kitten, ["@", "send-text", "--match", "id:\(win)", key])
+            return true
         case .some:
             // Terminal.app & friends have no raw-key API; activate the right
             // window first, then synthesize the keystroke (needs Accessibility).
@@ -192,6 +218,54 @@ enum TerminalBridge {
         _ = run(tmux, ["switch-client", "-t", pane])
         _ = run(tmux, ["select-window", "-t", pane])
         _ = run(tmux, ["select-pane", "-t", pane])
+    }
+
+    // MARK: - WezTerm (wezterm cli — precise, matched by tty)
+
+    private static var weztermPath: String? {
+        ["/opt/homebrew/bin/wezterm", "/usr/local/bin/wezterm",
+         "/Applications/WezTerm.app/Contents/MacOS/wezterm"]
+            .first { FileManager.default.isExecutableFile(atPath: $0) }
+    }
+
+    /// pane_id of the WezTerm pane whose tty matches, e.g. "/dev/ttys003".
+    private static func weztermPaneId(dev: String) -> String? {
+        guard let wez = weztermPath else { return nil }
+        let out = run(wez, ["cli", "list", "--format", "json"])
+        guard let data = out.data(using: .utf8),
+              let panes = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]]
+        else { return nil }
+        for pane in panes where pane["tty_name"] as? String == dev {
+            if let id = pane["pane_id"] as? Int { return String(id) }
+        }
+        return nil
+    }
+
+    // MARK: - kitty (kitten @ — needs allow_remote_control; falls back to activate)
+
+    private static var kittenPath: String? {
+        ["/opt/homebrew/bin/kitten", "/usr/local/bin/kitten",
+         "/Applications/kitty.app/Contents/MacOS/kitten"]
+            .first { FileManager.default.isExecutableFile(atPath: $0) }
+    }
+
+    /// kitty window id whose foreground process is the agent (matched by pid).
+    private static func kittyWindowId(pid: Int32) -> String? {
+        guard let kitten = kittenPath else { return nil }
+        let out = run(kitten, ["@", "ls"]) // empty if remote control is off
+        guard let data = out.data(using: .utf8),
+              let osWindows = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]]
+        else { return nil }
+        for osWindow in osWindows {
+            for tab in (osWindow["tabs"] as? [[String: Any]] ?? []) {
+                for window in (tab["windows"] as? [[String: Any]] ?? []) {
+                    let fg = window["foreground_processes"] as? [[String: Any]] ?? []
+                    let matches = fg.contains { ($0["pid"] as? Int).map(Int32.init) == pid }
+                    if matches, let id = window["id"] as? Int { return String(id) }
+                }
+            }
+        }
+        return nil
     }
 
     // MARK: - Plumbing

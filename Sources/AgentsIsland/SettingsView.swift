@@ -700,21 +700,21 @@ private struct SoundPane: View {
             SSection(title: "Session") {
                 SoundPickerRow(title: "Session Start",
                                subtitle: "A new Claude / Codex / Gemini session appears",
-                               key: Pref.soundSessionStart, customSounds: customSounds)
+                               key: Pref.soundSessionStart, defaultSound: SoundEngine.off, customSounds: customSounds)
                 SDiv()
                 SoundPickerRow(title: "Task Complete",
                                subtitle: "AI finished its turn",
-                               key: Pref.soundTaskComplete, customSounds: customSounds)
+                               key: Pref.soundTaskComplete, defaultSound: "Glass", customSounds: customSounds)
                 SDiv()
                 SoundPickerRow(title: "Task Acknowledge",
                                subtitle: "You submitted a prompt and the agent got to work",
-                               key: Pref.soundAcknowledge, customSounds: customSounds)
+                               key: Pref.soundAcknowledge, defaultSound: SoundEngine.off, customSounds: customSounds)
             }
 
             SSection(title: "Interactions") {
                 SoundPickerRow(title: "Approval Needed",
                                subtitle: "Claude asks for permission (needs the hook — see Integrations)",
-                               key: Pref.soundApprovalNeeded, customSounds: customSounds)
+                               key: Pref.soundApprovalNeeded, defaultSound: "Ping", customSounds: customSounds)
             }
 
             SSection(title: "My Sounds", footer: "Imported sounds appear in every picker above.") {
@@ -789,12 +789,14 @@ private struct SoundPickerRow: View {
     let customSounds: [String]
     @AppStorage private var selection: String
 
-    init(title: String, subtitle: String? = nil, key: String, customSounds: [String]) {
+    init(title: String, subtitle: String? = nil, key: String, defaultSound: String, customSounds: [String]) {
         self.title = title
         self.subtitle = subtitle
         self.key = key
         self.customSounds = customSounds
-        _selection = AppStorage(wrappedValue: SoundEngine.off, key)
+        // Match Pref.registerDefaults so the picker's default and the value
+        // SoundEngine reads never disagree.
+        _selection = AppStorage(wrappedValue: defaultSound, key)
     }
 
     var body: some View {
@@ -874,6 +876,7 @@ private struct UsagePane: View {
                 }
             }
 
+            if enabled {
             SSection(title: "Current 5-hour window") {
                 if let reset = snapshot.blockResetAt,
                    let percent = snapshot.blockPercent(budget: budgets.block) {
@@ -897,7 +900,37 @@ private struct UsagePane: View {
                     UsageBar(percent: snapshot.weekPercent(budget: budgets.week))
                 }
             }
+
+            if tracker.codex.hasData {
+                SSection(title: "Codex" + (tracker.codex.planType.map { " · \($0.capitalized)" } ?? ""),
+                         footer: "Read straight from Codex's own rate-limit reports in ~/.codex — these are exact, not estimated.") {
+                    if let primary = tracker.codex.primary { codexRow(primary) }
+                    if let secondary = tracker.codex.secondary {
+                        SDiv(); codexRow(secondary)
+                    }
+                }
+            }
+            }
         }
+    }
+
+    private func codexRow(_ window: UsageTracker.CodexWindow) -> some View {
+        SRow(title: Self.windowTitle(window),
+             subtitle: window.resetsAt.map { "Resets " + Self.relative($0) }) {
+            UsageBar(percent: Int(window.usedPercent.rounded()))
+        }
+    }
+
+    private static func windowTitle(_ window: UsageTracker.CodexWindow) -> String {
+        let m = window.windowMinutes
+        if m % 1440 == 0 { return "Rolling \(m / 1440)-day window" }
+        if m % 60 == 0 { return "Current \(m / 60)-hour window" }
+        return "\(m)-minute window"
+    }
+
+    private static let relFormatter = RelativeDateTimeFormatter()
+    private static func relative(_ date: Date) -> String {
+        relFormatter.localizedString(for: date, relativeTo: Date())
     }
 
     private static func tokens(_ value: Double) -> String {
@@ -1062,21 +1095,63 @@ private struct ShortcutsPane: View {
 private struct SSHRemotePane: View {
     @State private var hosts = RemoteMonitor.hosts()
     @State private var newHost = ""
+    @ObservedObject private var remote = RemoteMonitor.shared
+    @State private var configHosts = RemoteMonitor.sshConfigHosts()
+
+    /// ~/.ssh/config hosts not already added.
+    private var unusedConfigHosts: [String] {
+        let added = Set(hosts.map(\.host))
+        return configHosts.filter { !added.contains($0) }
+    }
+
+    /// Enabled hosts we've confirmed a live SSH connection to.
+    private var connectedHosts: [RemoteMonitor.Host] {
+        hosts.filter { $0.enabled && remote.status[$0.host]?.reachability == .connected }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 22) {
+            SSection(title: "Connected devices",
+                     footer: "Machines reachable right now over key-based SSH. The count is the number of agent jobs currently running there — they also appear in the island with a host chip.") {
+                if connectedHosts.isEmpty {
+                    SRow(title: "No devices connected",
+                         subtitle: hosts.isEmpty ? "Add a host below to start scanning."
+                                                 : "Nothing reachable yet — check the host list below.") { EmptyView() }
+                } else {
+                    ForEach(Array(connectedHosts.enumerated()), id: \.element.host) { index, host in
+                        if index > 0 { SDiv() }
+                        let count = remote.status[host.host]?.sessionCount ?? 0
+                        SRow(title: host.host,
+                             subtitle: count == 0 ? "Connected · no agents running"
+                                                  : "\(count) remote \(count == 1 ? "job" : "jobs") running") {
+                            HStack(spacing: 8) {
+                                Circle().fill(AgentStatus.working.color).frame(width: 8, height: 8)
+                                Image(systemName: "checkmark.seal.fill")
+                                    .font(.system(size: 13))
+                                    .foregroundStyle(AgentStatus.working.color)
+                            }
+                        }
+                    }
+                }
+            }
+
             SSection(title: "Remote hosts",
                      footer: "Hosts are scanned every 10 seconds over ssh with BatchMode (key authentication only — set up your ~/.ssh/config first; nothing will ever prompt for a password). Remote sessions appear with a host chip; status is CPU-based, working directories come from /proc on Linux.") {
                 if hosts.isEmpty {
                     SRow(title: "No remote hosts yet.") { EmptyView() }
                 }
                 ForEach(hosts) { host in
-                    SRow(title: host.host, subtitle: statusText(host)) {
-                        HStack(spacing: 10) {
+                    SRow(title: host.host) {
+                        HStack(spacing: 12) {
+                            statusBadge(host)
+                            Button("Test") { RemoteMonitor.shared.testConnection(host: host.host) }
+                                .controlSize(.small)
+                                .disabled(!host.enabled)
                             Toggle("", isOn: binding(for: host)).toggleStyle(.switch).labelsHidden()
                             Button {
                                 hosts.removeAll { $0.host == host.host }
                                 RemoteMonitor.saveHosts(hosts)
+                                hosts = RemoteMonitor.hosts()
                             } label: {
                                 Image(systemName: "trash").font(.system(size: 12))
                                     .foregroundStyle(.secondary)
@@ -1091,30 +1166,63 @@ private struct SSHRemotePane: View {
                         TextField("user@server or ssh alias", text: $newHost)
                             .textFieldStyle(.roundedBorder)
                             .frame(width: 220)
-                            .onSubmit(add)
-                        Button("Add", action: add)
+                            .onSubmit { add(newHost) }
+                        Button("Add") { add(newHost) }
                             .disabled(newHost.trimmingCharacters(in: .whitespaces).isEmpty)
                     }
                 }
             }
+
+            if !unusedConfigHosts.isEmpty {
+                SSection(title: "From ~/.ssh/config",
+                         footer: "Hosts declared in your SSH config. Tap to add one — it uses the same key auth and connection settings you've already configured.") {
+                    ForEach(Array(unusedConfigHosts.enumerated()), id: \.element) { index, alias in
+                        if index > 0 { SDiv() }
+                        SRow(title: alias) {
+                            Button {
+                                add(alias)
+                            } label: {
+                                Label("Add", systemImage: "plus.circle")
+                            }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(Color.accentColor)
+                        }
+                    }
+                }
+            }
         }
+        .onAppear { configHosts = RemoteMonitor.sshConfigHosts() }
     }
 
-    private func statusText(_ host: RemoteMonitor.Host) -> String {
-        guard host.enabled else { return "Disabled" }
-        switch RemoteMonitor.shared.isReachable(host.host) {
-        case .some(true): return "Connected"
-        case .some(false): return "Unreachable (check ssh key auth)"
-        case .none: return "Waiting for first scan…"
+    @ViewBuilder
+    private func statusBadge(_ host: RemoteMonitor.Host) -> some View {
+        let (color, text): (Color, String) = {
+            guard host.enabled else { return (Color(white: 0.5), "Disabled") }
+            switch remote.status[host.host]?.reachability {
+            case .connected: return (AgentStatus.working.color, "Connected")
+            case .unreachable: return (Color(red: 1.0, green: 0.45, blue: 0.45), "Unreachable")
+            case .checking: return (AgentStatus.waiting.color, "Checking…")
+            case .unknown, .none: return (Color(white: 0.5), "Waiting…")
+            }
+        }()
+        HStack(spacing: 6) {
+            Circle().fill(color).frame(width: 7, height: 7)
+            Text(text)
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
         }
+        .help(remote.status[host.host]?.reachability == .unreachable
+              ? "Could not connect. Ensure key-based SSH works: `ssh \(host.host)` should log in without a password."
+              : "")
     }
 
-    private func add() {
-        let trimmed = newHost.trimmingCharacters(in: .whitespaces)
+    private func add(_ raw: String) {
+        let trimmed = RemoteMonitor.normalize(raw)
         guard !trimmed.isEmpty, !hosts.contains(where: { $0.host == trimmed }) else { return }
         hosts.append(RemoteMonitor.Host(host: trimmed, enabled: true))
         newHost = ""
         RemoteMonitor.saveHosts(hosts)
+        hosts = RemoteMonitor.hosts()
     }
 
     private func binding(for host: RemoteMonitor.Host) -> Binding<Bool> {
@@ -1124,6 +1232,7 @@ private struct SSHRemotePane: View {
                 if let index = hosts.firstIndex(where: { $0.host == host.host }) {
                     hosts[index].enabled = enabled
                     RemoteMonitor.saveHosts(hosts)
+                    hosts = RemoteMonitor.hosts()
                 }
             }
         )
@@ -1135,6 +1244,11 @@ private struct SSHRemotePane: View {
 private struct AboutPane: View {
     private var inApplications: Bool { Bundle.main.bundlePath.hasPrefix("/Applications/") }
 
+    /// The real bundle version, so the About pane never lies about the build.
+    static var appVersion: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev"
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 22) {
             SSection {
@@ -1145,8 +1259,11 @@ private struct AboutPane: View {
                     Text("A Dynamic Island for your AI coding agents.")
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
-                    Text("Version 1.0")
+                    Text("Version \(Self.appVersion)")
                         .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(.tertiary)
+                    Text("\(AgentKind.allCases.count) agents tracked")
+                        .font(.system(size: 10))
                         .foregroundStyle(.tertiary)
                 }
                 .frame(maxWidth: .infinity)
@@ -1168,8 +1285,10 @@ private struct AboutPane: View {
                 }
             }
 
-            SSection(title: "Tracked data", footer: "Everything is read locally — Claude Code's session registry, transcripts and task store under ~/.claude, plus the process table. Nothing leaves your Mac.") {
+            SSection(title: "Tracked data", footer: "Everything is read locally — Claude's session registry, transcripts and task store under ~/.claude, Codex's rate limits under ~/.codex, plus the process table. Nothing leaves your Mac.") {
                 SRow(title: "Claude Code sessions", subtitle: "~/.claude/sessions · projects · tasks") { EmptyView() }
+                SDiv()
+                SRow(title: "Codex usage", subtitle: "~/.codex rollout rate limits (exact)") { EmptyView() }
                 SDiv()
                 SRow(title: "Other agents", subtitle: "Process table scan (ps / lsof)") { EmptyView() }
             }

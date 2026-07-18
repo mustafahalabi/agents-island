@@ -11,70 +11,80 @@ enum AgentKind: String, CaseIterable {
     case cursorAgent = "cursor-agent"
     case copilot
     case droid
+    // Expansion set — real, standalone CLI agents (verified command names).
+    // Deliberately excludes GUI-only tools with no headless CLI (Zed, Windsurf,
+    // Zhipu ZCode/GLM, WorkBuddy) — those run inside their editor, not as a
+    // detectable agent process.
+    case qwen
+    case kimi
+    case deepseek
+    case grok
+    case mistral
+    case antigravity
+    case qoder
+    case codebuddy
+    case trae
+    case kiro
+    case gajae
+    case mimo
 
-    var displayName: String {
-        switch self {
-        case .claude: return "Claude"
-        case .codex: return "Codex"
-        case .gemini: return "Gemini"
-        case .aider: return "Aider"
-        case .goose: return "Goose"
-        case .opencode: return "OpenCode"
-        case .amp: return "Amp"
-        case .cursorAgent: return "Cursor"
-        case .copilot: return "Copilot"
-        case .droid: return "Droid"
-        }
+    /// Everything the UI needs to render an agent, in one place so adding an
+    /// agent is a single table row rather than edits across five switches.
+    struct Meta {
+        let displayName: String
+        let rgb: (Double, Double, Double)
+        let symbol: String            // SF Symbol fallback when no brand icon
+        let iconFile: String?         // Resources/agents/<name>.png, nil = symbol
+        let aliases: [String]         // extra executable basenames that map here
     }
 
-    var color: Color {
-        switch self {
-        case .claude: return Color(red: 0.85, green: 0.47, blue: 0.34)
-        case .codex: return Color(red: 0.06, green: 0.64, blue: 0.50)
-        case .gemini: return Color(red: 0.31, green: 0.53, blue: 0.97)
-        case .aider: return Color(red: 0.18, green: 0.80, blue: 0.44)
-        case .goose: return Color(red: 0.61, green: 0.35, blue: 0.71)
-        case .opencode: return Color(red: 0.35, green: 0.78, blue: 0.98)
-        case .amp: return Color(red: 0.96, green: 0.26, blue: 0.21)
-        case .cursorAgent: return Color(red: 0.62, green: 0.62, blue: 0.68)
-        case .copilot: return Color(red: 0.45, green: 0.49, blue: 0.55)
-        case .droid: return Color(red: 0.93, green: 0.42, blue: 0.10)
-        }
-    }
+    var meta: Meta { Self.table[self] ?? Meta(displayName: rawValue.capitalized, rgb: (0.5, 0.5, 0.55), symbol: "terminal.fill", iconFile: nil, aliases: []) }
 
+    var displayName: String { meta.displayName }
+    var color: Color { Color(red: meta.rgb.0, green: meta.rgb.1, blue: meta.rgb.2) }
+    var symbol: String { meta.symbol }
     /// Bundled brand icon (Resources/agents/<name>.png), nil = SF symbol fallback.
-    var iconFile: String? {
-        switch self {
-        case .claude: return "claude-color"
-        case .codex: return "openai"
-        case .gemini: return "gemini-color"
-        case .copilot: return "githubcopilot"
-        case .cursorAgent: return "cursor"
-        case .opencode: return "opencode"
-        case .goose: return "goose"
-        case .amp: return "amp-color"
-        case .aider, .droid: return nil
-        }
-    }
+    var iconFile: String? { meta.iconFile }
 
-    var symbol: String {
-        switch self {
-        case .claude: return "sparkle"
-        case .codex: return "curlybraces"
-        case .gemini: return "diamond.fill"
-        case .aider: return "wand.and.rays"
-        case .goose: return "bird.fill"
-        case .opencode: return "terminal.fill"
-        case .amp: return "bolt.fill"
-        case .cursorAgent: return "cursorarrow"
-        case .copilot: return "eyeglasses"
-        case .droid: return "cpu.fill"
-        }
-    }
+    private static let table: [AgentKind: Meta] = [
+        .claude:      Meta(displayName: "Claude",   rgb: (0.85, 0.47, 0.34), symbol: "sparkle",         iconFile: "claude-color",  aliases: []),
+        .codex:       Meta(displayName: "Codex",    rgb: (0.06, 0.64, 0.50), symbol: "curlybraces",     iconFile: "openai",        aliases: []),
+        .gemini:      Meta(displayName: "Gemini",   rgb: (0.31, 0.53, 0.97), symbol: "diamond.fill",    iconFile: "gemini-color",  aliases: []),
+        .aider:       Meta(displayName: "Aider",    rgb: (0.18, 0.80, 0.44), symbol: "wand.and.rays",   iconFile: nil,             aliases: []),
+        .goose:       Meta(displayName: "Goose",    rgb: (0.61, 0.35, 0.71), symbol: "bird.fill",       iconFile: "goose",         aliases: []),
+        .opencode:    Meta(displayName: "OpenCode", rgb: (0.35, 0.78, 0.98), symbol: "terminal.fill",   iconFile: "opencode",      aliases: []),
+        .amp:         Meta(displayName: "Amp",      rgb: (0.96, 0.26, 0.21), symbol: "bolt.fill",       iconFile: "amp-color",     aliases: []),
+        .cursorAgent: Meta(displayName: "Cursor",   rgb: (0.62, 0.62, 0.68), symbol: "cursorarrow",     iconFile: "cursor",        aliases: ["cursor"]),
+        .copilot:     Meta(displayName: "Copilot",  rgb: (0.45, 0.49, 0.55), symbol: "eyeglasses",      iconFile: "githubcopilot", aliases: []),
+        .droid:       Meta(displayName: "Droid",    rgb: (0.93, 0.42, 0.10), symbol: "cpu.fill",        iconFile: nil,             aliases: []),
+        // Expansion set (SF-symbol fallbacks until brand icons are bundled).
+        // Command names + aliases are the VERIFIED executable basenames — the
+        // process shows up as the interpreter (node/python/bun) running one of
+        // these, or as the native binary directly.
+        .qwen:        Meta(displayName: "Qwen",     rgb: (0.38, 0.36, 0.93), symbol: "diamond.fill",    iconFile: nil, aliases: ["qwen-code"]),
+        .kimi:        Meta(displayName: "Kimi",     rgb: (0.12, 0.12, 0.15), symbol: "moon.stars.fill", iconFile: nil, aliases: ["kimi-code"]),
+        .deepseek:    Meta(displayName: "DeepSeek", rgb: (0.30, 0.42, 1.00), symbol: "magnifyingglass", iconFile: nil, aliases: ["deepcode"]),
+        .grok:        Meta(displayName: "Grok",     rgb: (0.12, 0.12, 0.14), symbol: "x.circle.fill",   iconFile: nil, aliases: ["grok-cli"]),
+        .mistral:     Meta(displayName: "Mistral",  rgb: (0.98, 0.32, 0.06), symbol: "wind",            iconFile: nil, aliases: ["vibe", "mistral-vibe"]),
+        .antigravity: Meta(displayName: "Antigravity", rgb: (0.26, 0.52, 0.96), symbol: "arrow.up.circle.fill", iconFile: nil, aliases: ["agy"]),
+        .qoder:       Meta(displayName: "Qoder",    rgb: (0.36, 0.40, 0.95), symbol: "chevron.left.forwardslash.chevron.right", iconFile: nil, aliases: ["qodercli"]),
+        .codebuddy:   Meta(displayName: "CodeBuddy", rgb: (0.20, 0.52, 0.92), symbol: "person.fill",    iconFile: nil, aliases: []),
+        .trae:        Meta(displayName: "Trae",     rgb: (0.90, 0.28, 0.30), symbol: "wand.and.stars",  iconFile: nil, aliases: ["trae-cli", "trae-agent"]),
+        .kiro:        Meta(displayName: "Kiro",     rgb: (0.90, 0.45, 0.13), symbol: "cube.fill",       iconFile: nil, aliases: ["kiro-cli"]),
+        .gajae:       Meta(displayName: "Gajae",    rgb: (0.85, 0.40, 0.55), symbol: "leaf.fill",       iconFile: nil, aliases: ["gjc"]),
+        .mimo:        Meta(displayName: "MiMo",     rgb: (0.98, 0.42, 0.10), symbol: "cpu.fill",         iconFile: nil, aliases: ["mimo-code"]),
+    ]
 
-    /// Match a process executable basename to an agent kind.
+    /// Match a process executable basename to an agent kind — by rawValue first,
+    /// then by any registered alias (so "cursor" maps to the cursor-agent kind).
     init?(matching basename: String) {
-        self.init(rawValue: basename.lowercased())
+        let name = basename.lowercased()
+        if let kind = AgentKind(rawValue: name) { self = kind; return }
+        for kind in AgentKind.allCases where kind.meta.aliases.contains(name) {
+            self = kind
+            return
+        }
+        return nil
     }
 }
 

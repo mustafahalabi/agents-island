@@ -56,10 +56,9 @@ final class ApprovalCenter: ObservableObject {
         let registry = ClaudeSessions.sessionsByPid()
         for file in files.sorted() where file.hasSuffix(".json") {
             let path = Self.spoolDir + "/" + file
-            defer { try? fm.removeItem(atPath: path) }
             guard let data = fm.contents(atPath: path),
                   let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
-            else { continue }
+            else { try? fm.removeItem(atPath: path); continue } // unparseable → drop
 
             // PermissionRequest events carry the tool name directly; plain
             // Notification events only when the message mentions permission
@@ -72,11 +71,19 @@ final class ApprovalCenter: ObservableObject {
             } else if message.localizedCaseInsensitiveContains("permission") {
                 tool = toolName(from: message)
             } else {
+                try? fm.removeItem(atPath: path); continue // not a permission event
+            }
+            guard let sessionId = obj["session_id"] as? String else {
+                try? fm.removeItem(atPath: path); continue
+            }
+            guard let pid = registry.first(where: { $0.value.sessionId == sessionId })?.key else {
+                // The hook can beat Claude's own session-registry file to disk.
+                // Keep the event so a later tick can match it once the pid is
+                // known — but don't spool a never-matching event forever.
+                if spoolFileAge(path) > 30 { try? fm.removeItem(atPath: path) }
                 continue
             }
-            guard let sessionId = obj["session_id"] as? String,
-                  let pid = registry.first(where: { $0.value.sessionId == sessionId })?.key
-            else { continue }
+            try? fm.removeItem(atPath: path) // matched → consume
             let agent = AgentMonitor.shared.agents.first { $0.id == pid }
             let toolName = tool
             DispatchQueue.main.async {
@@ -91,6 +98,12 @@ final class ApprovalCenter: ObservableObject {
                 NotificationCenter.default.post(name: .approvalNeeded, object: pid)
             }
         }
+    }
+
+    /// Seconds since a spool file was written (greatestFiniteMagnitude if unknown).
+    private func spoolFileAge(_ path: String) -> TimeInterval {
+        let mtime = (try? FileManager.default.attributesOfItem(atPath: path))?[.modificationDate] as? Date
+        return mtime.map { Date().timeIntervalSince($0) } ?? .greatestFiniteMagnitude
     }
 
     /// "Claude needs your permission to use Bash" → "Bash"
