@@ -179,7 +179,12 @@ if [ -n "$SIGN_ID" ]; then
 
     echo "==> Generating signed appcast"
     CASTDIR=$(mktemp -d)
-    cp AgentsIsland.zip "$CASTDIR/AgentsIsland-${VERSION}.zip"
+    # The filename here becomes the appcast's enclosure URL, so it has to match
+    # the asset name uploaded below *exactly*. Staging it as
+    # AgentsIsland-$VERSION.zip is what made v0.4.7's enclosure 404: the release
+    # asset is plain AgentsIsland.zip, so Sparkle found the update and then
+    # failed to download it.
+    cp AgentsIsland.zip "$CASTDIR/AgentsIsland.zip"
     "$SPARKLE_BIN/generate_appcast" \
         --download-url-prefix "https://github.com/mustafahalabi/agents-island/releases/download/$TAG/" \
         --link "https://github.com/mustafahalabi/agents-island" \
@@ -221,11 +226,31 @@ rm -f AgentsIsland.zip AgentsIsland.zip.sha256 "$DMG" "$DMG.sha256"
 if [ -n "$APPCAST" ]; then
     echo "==> Verifying the update feed is reachable"
     FEED="https://github.com/mustafahalabi/agents-island/releases/latest/download/appcast.xml"
-    if curl -fsSL "$FEED" | grep -q "$VERSION"; then
+    SERVED=$(curl -fsSL "$FEED" || true)
+    if echo "$SERVED" | grep -q "$VERSION"; then
         echo "    ✓ feed serves $VERSION"
     else
         echo "WARNING: $FEED does not serve $VERSION yet." >&2
         echo "         In-app updates will not offer this release until it does." >&2
+    fi
+
+    # Serving the appcast is only half of it — the enclosure it points at has to
+    # exist too. v0.4.7 shipped a feed whose download URL 404'd, so every client
+    # would have found the update and then failed to fetch it. Checking the
+    # version string alone did not catch that.
+    ENCLOSURE=$(echo "$SERVED" | sed -n 's/.*enclosure url="\([^"]*\)".*/\1/p' | head -1)
+    if [ -n "$ENCLOSURE" ]; then
+        CODE=$(curl -sI -o /dev/null -w '%{http_code}' -L "$ENCLOSURE" || echo 000)
+        if [ "$CODE" = "200" ]; then
+            echo "    ✓ enclosure downloadable ($ENCLOSURE)"
+        else
+            echo "WARNING: the appcast enclosure is not downloadable (HTTP $CODE):" >&2
+            echo "           $ENCLOSURE" >&2
+            echo "         Clients will see the update and fail to install it." >&2
+            echo "         Fix the asset name, regenerate the appcast, and re-upload it." >&2
+        fi
+    else
+        echo "WARNING: could not find an enclosure URL in the served appcast." >&2
     fi
     rm -rf "$CASTDIR"
 fi
