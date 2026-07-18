@@ -860,12 +860,12 @@ private struct UsagePane: View {
         let budgets = UsageTracker.budgets(plan: plan)
         let snapshot = tracker.snapshot
         VStack(alignment: .leading, spacing: 22) {
-            SSection(footer: "Estimated locally from transcript token counts (cache reads weighted at 10%). Anthropic doesn't publish exact budgets — pick the plan that matches yours and treat the percentages as a guide.") {
+            SSection(footer: "One group per provider below. The plan sets your Claude budget estimate; Codex is read exactly from its own reports.") {
                 SRow(title: "Show usage in the panel header") {
                     Toggle("", isOn: $enabled).toggleStyle(.switch).labelsHidden()
                 }
                 SDiv()
-                SRow(title: "Plan") {
+                SRow(title: "Claude plan") {
                     Picker("", selection: $plan) {
                         Text("Pro").tag("pro")
                         Text("Max 5x").tag("max5x")
@@ -877,33 +877,28 @@ private struct UsagePane: View {
             }
 
             if enabled {
-            SSection(title: "Current 5-hour window") {
+            SSection(title: "Claude · \(Self.planName(plan))",
+                     footer: "Estimated locally from transcript token counts (cache reads weighted at 10%). Anthropic doesn't publish exact budgets — treat the percentages as a guide.") {
                 if let reset = snapshot.blockResetAt,
                    let percent = snapshot.blockPercent(budget: budgets.block) {
-                    SRow(title: "Used", subtitle: Self.tokens(snapshot.blockTokens) + " weighted tokens") {
+                    SRow(title: "Current 5-hour window",
+                         subtitle: Self.tokens(snapshot.blockTokens) + " weighted · resets " + Self.relative(reset)) {
                         UsageBar(percent: percent)
                     }
-                    SDiv()
-                    SRow(title: "Resets") {
-                        Text(reset, style: .relative)
-                            .font(.system(size: 12, design: .monospaced))
-                            .foregroundStyle(.secondary)
-                    }
                 } else {
-                    SRow(title: "No active session window",
-                         subtitle: "A window opens with your next Claude message.") { EmptyView() }
+                    SRow(title: "Current 5-hour window",
+                         subtitle: "No active window — opens with your next Claude message.") { EmptyView() }
                 }
-            }
-
-            SSection(title: "Rolling 7 days") {
-                SRow(title: "Used", subtitle: Self.tokens(snapshot.weekTokens) + " weighted tokens") {
+                SDiv()
+                SRow(title: "Rolling 7-day window",
+                     subtitle: Self.tokens(snapshot.weekTokens) + " weighted tokens") {
                     UsageBar(percent: snapshot.weekPercent(budget: budgets.week))
                 }
             }
 
             if tracker.codex.hasData {
                 SSection(title: "Codex" + (tracker.codex.planType.map { " · \($0.capitalized)" } ?? ""),
-                         footer: "Read straight from Codex's own rate-limit reports in ~/.codex — these are exact, not estimated.") {
+                         footer: "Read straight from Codex's own rate-limit reports in ~/.codex — exact, not estimated.") {
                     if let primary = tracker.codex.primary { codexRow(primary) }
                     if let secondary = tracker.codex.secondary {
                         SDiv(); codexRow(secondary)
@@ -911,6 +906,14 @@ private struct UsagePane: View {
                 }
             }
             }
+        }
+    }
+
+    private static func planName(_ plan: String) -> String {
+        switch plan {
+        case "pro": return "Pro"
+        case "max20x": return "Max 20x"
+        default: return "Max 5x"
         }
     }
 
@@ -975,13 +978,8 @@ private struct AgentsPane: View {
             ForEach(Array(AgentKind.allCases.enumerated()), id: \.element.rawValue) { index, kind in
                 if index > 0 { SDiv() }
                 HStack(spacing: 10) {
-                    ZStack {
-                        Circle().fill(kind.color.gradient)
-                        Image(systemName: kind.symbol)
-                            .font(.system(size: 9, weight: .semibold))
-                            .foregroundStyle(.white)
-                    }
-                    .frame(width: 20, height: 20)
+                    // Real brand logo when bundled; tinted SF-symbol fallback otherwise.
+                    AgentIconView(kind: kind, status: .working, size: 22, showStatus: false)
                     Text(kind.displayName)
                         .font(.system(size: 13))
                     Spacer()

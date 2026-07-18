@@ -6,6 +6,8 @@ struct AgentIconView: View {
     let kind: AgentKind
     let status: AgentStatus
     var size: CGFloat = 26
+    /// Show the corner status dot. Off for static lists (e.g. Settings → Agents).
+    var showStatus: Bool = true
 
     private static var cache: [String: NSImage] = [:]
 
@@ -13,10 +15,12 @@ struct AgentIconView: View {
         icon
             .frame(width: size, height: size)
             .overlay(alignment: .bottomTrailing) {
-                PulsingDot(color: status.color, active: status == .working)
-                    .frame(width: size * 0.28, height: size * 0.28)
-                    .background(Circle().fill(.black).padding(-2))
-                    .offset(x: 2, y: 2)
+                if showStatus {
+                    PulsingDot(color: status.color, active: status == .working)
+                        .frame(width: size * 0.28, height: size * 0.28)
+                        .background(Circle().fill(.black).padding(-2))
+                        .offset(x: 2, y: 2)
+                }
             }
     }
 

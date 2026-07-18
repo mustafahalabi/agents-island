@@ -205,12 +205,21 @@ enum ClaudeSessions {
 
         let size = (try? handle.seekToEnd()) ?? 0
         let offset = size > UInt64(bytes) ? size - UInt64(bytes) : 0
+
+        // The window's first line is only *partial* if the byte just before the
+        // offset isn't a newline; when it aligns to a line boundary, dropping it
+        // would lose a complete entry.
+        var startsMidLine = false
+        if offset > 0 {
+            try? handle.seek(toOffset: offset - 1)
+            startsMidLine = (try? handle.read(upToCount: 1))?.first != UInt8(ascii: "\n")
+        }
         try? handle.seek(toOffset: offset)
         guard let data = try? handle.readToEnd(),
               let text = String(data: data, encoding: .utf8) else { return [] }
 
         var lines = text.split(separator: "\n", omittingEmptySubsequences: true)
-        if offset > 0, !lines.isEmpty { lines.removeFirst() } // partial line
+        if startsMidLine, !lines.isEmpty { lines.removeFirst() }
 
         return lines.compactMap { line in
             guard let data = line.data(using: .utf8) else { return nil }
