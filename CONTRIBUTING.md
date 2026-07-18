@@ -3,6 +3,10 @@
 Thanks for taking the time to contribute. This is a native macOS SwiftUI app with
 no build system beyond SwiftPM, so getting started is short.
 
+Agents Island is maintained by [@mustafahalabi](https://github.com/mustafahalabi)
+(Mustafa Halabi) and [@Mhmdhammoud](https://github.com/Mhmdhammoud) (Mohammad
+Hammoud). Both are code owners, so either can review and merge.
+
 ## Ground rules
 
 - `main` is protected. Nobody pushes to it directly — every change lands through a
@@ -61,18 +65,33 @@ from the `.app` bundle, so prefer `./make-app.sh` when testing those.
   started — push follow-up commits instead so reviewers can see what changed.
   Everything is squashed on merge, so the branch history stays your own business.
 
-## No third-party dependencies
+## Dependencies
 
-Agents Island deliberately ships with zero package dependencies. Everything is
-Foundation, SwiftUI, AppKit, and Carbon. PRs that add a dependency need a strong
-justification in the issue first — the app reads local files and must stay
-auditable and fast to launch.
+Agents Island ships with exactly one package dependency —
+[Sparkle](https://github.com/sparkle-project/Sparkle), which powers in-app
+updates. It's a deliberate exception: an updater installs executable code, and
+that signature-checking path is worth taking from an audited implementation
+rather than hand-rolling it.
+
+Everything else is Foundation, SwiftUI, AppKit, and Carbon. PRs that add a
+second dependency need a strong justification in the issue first — the app must
+stay auditable and fast to launch.
 
 ## Privacy is a hard constraint
 
-Nothing may leave the user's machine. No telemetry, no analytics, no crash
-reporting to a remote service, no network calls beyond the SSH scans the user
-explicitly configures. A PR that adds an outbound network call will be declined.
+No telemetry, no analytics, no crash reporting, and nothing about the user's
+agents, sessions, prompts, or transcripts may ever leave their machine. That
+data is the whole reason people trust this app on a work laptop.
+
+The app makes exactly two kinds of outbound connection, both user-visible and
+both disableable:
+
+1. **Update checks** — a daily fetch of the signed appcast from GitHub Releases
+   (Settings → About turns it off; Homebrew installs never do it at all)
+2. **SSH scans** — only to hosts the user explicitly configured
+
+A PR that adds any other network call will be declined. A PR that sends session
+data anywhere will be declined regardless of how it's transported.
 
 ## Adding support for a new agent
 
@@ -88,6 +107,6 @@ that write nothing readable are not, however popular they are.
 
 ## Release process
 
-Releases are cut locally by the maintainer with `scripts/release.sh` — signing
+Releases are cut locally by a maintainer with `scripts/release.sh` — signing
 and notarization need a Developer ID certificate that can't live in CI. You don't
 need to touch versioning in your PR.

@@ -1240,7 +1240,17 @@ private struct SSHRemotePane: View {
 // MARK: - About
 
 private struct AboutPane: View {
+    @ObservedObject private var updater = UpdateController.shared
+    @AppStorage(Pref.autoCheckUpdates) private var autoCheckUpdates = true
+
     private var inApplications: Bool { Bundle.main.bundlePath.hasPrefix("/Applications/") }
+
+    private var lastChecked: String {
+        guard let date = updater.lastCheckDate else { return "Never checked" }
+        let f = RelativeDateTimeFormatter()
+        f.unitsStyle = .full
+        return "Last checked \(f.localizedString(for: date, relativeTo: Date()))"
+    }
 
     /// The real bundle version, so the About pane never lies about the build.
     static var appVersion: String {
@@ -1266,6 +1276,30 @@ private struct AboutPane: View {
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 22)
+            }
+
+            SSection(title: "Updates",
+                     footer: updater.unavailableReason
+                     ?? "Checks GitHub for new releases. Downloads are verified against the project's signing key before anything is installed — this is the app's only network connection, and no session data is ever sent.") {
+                if let reason = updater.unavailableReason {
+                    SRow(title: "Automatic updates unavailable", subtitle: reason) {
+                        Image(systemName: "info.circle.fill").foregroundStyle(.secondary)
+                    }
+                } else {
+                    SRow(title: "Check for updates automatically",
+                         subtitle: lastChecked) {
+                        Toggle("", isOn: $autoCheckUpdates)
+                            .labelsHidden()
+                            .onChange(of: autoCheckUpdates) { _, on in
+                                updater.automaticallyChecks = on
+                            }
+                    }
+                    SDiv()
+                    SRow(title: "Check now", subtitle: "Version \(Self.appVersion)") {
+                        Button("Check for Updates…") { updater.checkForUpdates() }
+                            .disabled(!updater.canCheck)
+                    }
+                }
             }
 
             SSection(title: "Installation",

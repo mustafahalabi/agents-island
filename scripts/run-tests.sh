@@ -34,6 +34,12 @@ run "QuestionParseTests" "$TMP/question" \
     Sources/AgentsIsland/ClaudeSessions.swift \
     scripts/tests/QuestionParseTests.swift
 
+# InstallChannel.swift deliberately imports no Sparkle, so the self-update gate
+# compiles standalone here.
+run "InstallChannelTests" "$TMP/install" \
+    Sources/AgentsIsland/InstallChannel.swift \
+    scripts/tests/InstallChannelTests.swift
+
 if [ "$fail" = 0 ]; then
     echo "✅ all test suites passed"
 else

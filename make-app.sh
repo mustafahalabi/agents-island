@@ -14,13 +14,38 @@ cd "$(dirname "$0")"
 
 VERSION="${VERSION:-0.1.0}"
 
+# Sparkle verifies every download against this EdDSA public key. It is public
+# by design (the private half lives in the maintainer's Keychain — see
+# scripts/release.sh), but a build without it can't verify anything, so the
+# app disables in-app updates rather than trusting an unverified download.
+# CI and contributor builds legitimately have no key.
+SPARKLE_PUBLIC_KEY="${SPARKLE_PUBLIC_KEY:-}"
+if [ -z "$SPARKLE_PUBLIC_KEY" ] && [ -f assets/sparkle-public-key.txt ]; then
+    SPARKLE_PUBLIC_KEY=$(tr -d '[:space:]' < assets/sparkle-public-key.txt)
+fi
+[ -n "$SPARKLE_PUBLIC_KEY" ] || SPARKLE_PUBLIC_KEY="UNSET"
+
+# Served from the latest GitHub release, so the URL is stable across versions
+# and needs no separate hosting.
+SPARKLE_FEED_URL="${SPARKLE_FEED_URL:-https://github.com/mustafahalabi/agents-island/releases/latest/download/appcast.xml}"
+
 swift build -c release
 
 APP="dist/AgentsIsland.app"
 rm -rf "$APP"
-mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Frameworks"
 
 cp .build/release/AgentsIsland "$APP/Contents/MacOS/AgentsIsland"
+
+# Sparkle.framework — ditto, not cp, so the Versions/Current symlink farm
+# survives; a flattened framework fails codesign's bundle-format check.
+ditto .build/release/Sparkle.framework "$APP/Contents/Frameworks/Sparkle.framework"
+
+# SwiftPM links Sparkle as @rpath/... but only bakes in @loader_path, which
+# points at Contents/MacOS. Without this the app dies at launch with a dyld
+# "Library not loaded" before any of our code runs.
+install_name_tool -add_rpath "@executable_path/../Frameworks" \
+    "$APP/Contents/MacOS/AgentsIsland" 2>/dev/null || true
 # SPM resource bundle (agent brand icons) — Bundle.module finds it in Resources.
 cp -R .build/release/AgentsIsland_AgentsIsland.bundle "$APP/Contents/Resources/" 2>/dev/null || true
 cp assets/AppIcon.icns "$APP/Contents/Resources/" 2>/dev/null || true
@@ -36,7 +61,10 @@ cat > "$APP/Contents/Info.plist" <<EOF
     <key>CFBundleDisplayName</key><string>Agents Island</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleShortVersionString</key><string>${VERSION}</string>
-    <key>CFBundleVersion</key><string>1</string>
+    <!-- Sparkle compares CFBundleVersion to decide what is newer, so this
+         tracks the real version. It was hardcoded to 1 until auto-update
+         landed, which made every release look identical to an updater. -->
+    <key>CFBundleVersion</key><string>${VERSION}</string>
     <key>LSMinimumSystemVersion</key><string>14.0</string>
     <key>LSUIElement</key><true/>
     <key>CFBundleIconFile</key><string>AppIcon</string>
@@ -49,6 +77,14 @@ cat > "$APP/Contents/Info.plist" <<EOF
     <key>NSDownloadsFolderUsageDescription</key>
     <string>Agents Island reads each session's .git/HEAD to show the current branch on its card.</string>
     <key>NSHighResolutionCapable</key><true/>
+    <key>SUFeedURL</key><string>${SPARKLE_FEED_URL}</string>
+    <key>SUPublicEDKey</key><string>${SPARKLE_PUBLIC_KEY}</string>
+    <key>SUEnableAutomaticChecks</key><true/>
+    <key>SUScheduledCheckInterval</key><integer>86400</integer>
+    <!-- Downloading silently in the background is fine; installing is not.
+         Replacing a running menu bar app without asking would drop whatever
+         the user was watching, so the install step stays user-confirmed. -->
+    <key>SUAutomaticallyUpdate</key><false/>
 </dict>
 </plist>
 EOF
@@ -58,12 +94,39 @@ EOF
 # sealed bundle — breaking the signature for anyone not using Archive Utility.
 xattr -cr "$APP" 2>/dev/null || true
 
+# Code signing must run inside-out: every nested bundle first, the framework
+# next, the app last. Sparkle is not a plain dylib — it ships its own helper
+# app, an installer daemon and two XPC services, and signing only the outer
+# .app leaves those unsigned, which fails notarization.
+FW="$APP/Contents/Frameworks/Sparkle.framework"
+sparkle_nested() {
+    # Versions/B, not the top-level symlinks — codesign rejects symlinked paths.
+    echo "$FW/Versions/B/XPCServices/Downloader.xpc" \
+         "$FW/Versions/B/XPCServices/Installer.xpc" \
+         "$FW/Versions/B/Updater.app" \
+         "$FW/Versions/B/Autoupdate"
+}
+
 if [ -n "${SIGN_ID:-}" ]; then
+    # --preserve-metadata=entitlements: Sparkle's helpers ship with their own
+    # entitlements, and replacing them with the app's breaks the installer.
+    for nested in $(sparkle_nested); do
+        codesign --force --options runtime --timestamp \
+            --preserve-metadata=entitlements \
+            --sign "$SIGN_ID" "$nested"
+    done
+    codesign --force --options runtime --timestamp --sign "$SIGN_ID" "$FW"
+
     codesign --force --options runtime --timestamp \
         --entitlements assets/entitlements.plist \
         --sign "$SIGN_ID" "$APP"
-    codesign --verify --strict "$APP"
+    # --deep verifies the nested Sparkle helpers too, not just the outer seal.
+    codesign --verify --strict --deep "$APP"
 else
+    for nested in $(sparkle_nested); do
+        codesign --force --preserve-metadata=entitlements --sign - "$nested" 2>/dev/null || true
+    done
+    codesign --force --sign - "$FW" 2>/dev/null || true
     codesign --force --sign - "$APP" 2>/dev/null || true
 fi
 

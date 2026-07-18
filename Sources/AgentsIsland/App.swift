@@ -5,6 +5,7 @@ import UserNotifications
 struct AgentsIslandApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var delegate
     @ObservedObject private var monitor = AgentMonitor.shared
+    @ObservedObject private var updater = UpdateController.shared
 
     var body: some Scene {
         MenuBarExtra {
@@ -32,6 +33,9 @@ struct AgentsIslandApp: App {
         }
         Divider()
         Button("Refresh Now") { AgentMonitor.shared.scanNow() }
+        if updater.canCheck {
+            Button("Check for Updates…") { updater.checkForUpdates() }
+        }
         Button("Settings…") { SettingsWindowController.shared.show() }
             .keyboardShortcut(",")
         Divider()

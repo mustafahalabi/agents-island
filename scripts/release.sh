@@ -19,6 +19,34 @@ VERSION="${1:?usage: ./scripts/release.sh <version>}"
 TAG="v$VERSION"
 NOTARY_PROFILE="${NOTARY_PROFILE:-agents-island}"
 
+# Gatekeeper gate. A Developer ID signature is NOT enough — without a stapled
+# ticket macOS quarantines the app on first launch and users watch it vanish
+# from /Applications. Releases 0.3.0–0.4.5 shipped exactly that way, so nothing
+# gets uploaded until the artifact users actually download passes spctl.
+verify_notarized() {
+    local target="$1" label="$2"
+    # spctl assessment type depends on the artifact: an .app is judged as an
+    # executable, a .dmg as a document you open. Using -t exec on a disk image
+    # reports "does not seem to be an app" for a perfectly good DMG.
+    local -a assess
+    case "$target" in
+        *.dmg) assess=(-a -t open --context context:primary-signature) ;;
+        *)     assess=(-a -t exec) ;;
+    esac
+    echo "==> Verifying $label"
+    if ! xcrun stapler validate "$target" >/dev/null 2>&1; then
+        echo "FATAL: $label has no stapled notarization ticket." >&2
+        echo "       Gatekeeper will block it. Refusing to publish." >&2
+        exit 1
+    fi
+    if ! spctl "${assess[@]}" "$target" >/dev/null 2>&1; then
+        echo "FATAL: $label is rejected by Gatekeeper:" >&2
+        spctl "${assess[@]}" -vv "$target" 2>&1 | sed 's/^/       /' >&2
+        exit 1
+    fi
+    echo "    ✓ $label: notarized, stapled, Gatekeeper-accepted"
+}
+
 # ---- Signing prerequisites -------------------------------------------------
 SIGN_ID=$(security find-identity -v -p codesigning 2>/dev/null \
     | grep -o '"Developer ID Application: [^"]*"' | head -1 | tr -d '"') || true
@@ -37,6 +65,25 @@ if [ -z "$SIGN_ID" ] || [ "$HAVE_NOTARY" != 1 ]; then
     SIGN_ID=""
 fi
 
+# ---- Tap access (checked up front) -----------------------------------------
+# Clone and dry-run the push *before* anything is published. The tap bump used
+# to run last, so a credential problem surfaced only after the release was
+# already public — leaving releases shipping while the cask silently rotted.
+KEEP_TAP=0
+TAPTMP=$(mktemp -d)
+trap '[ "$KEEP_TAP" = 1 ] || rm -rf "$TAPTMP"' EXIT
+if [ -n "$SIGN_ID" ]; then
+    echo "==> Checking Homebrew tap push access"
+    git clone --quiet --depth 1 "https://github.com/mustafahalabi/homebrew-tap.git" "$TAPTMP/tap"
+    if ! git -C "$TAPTMP/tap" push --dry-run -q 2>/dev/null; then
+        echo "FATAL: no push access to mustafahalabi/homebrew-tap." >&2
+        echo "       Fix credentials first — otherwise the release ships and the" >&2
+        echo "       cask stays behind, which is how 0.3.0–0.4.5 got stranded." >&2
+        exit 1
+    fi
+    echo "    ✓ tap writable"
+fi
+
 # ---- Build ------------------------------------------------------------------
 echo "==> Building $TAG${SIGN_ID:+ signed as $SIGN_ID}"
 VERSION="$VERSION" SIGN_ID="$SIGN_ID" ./make-app.sh --no-launch
@@ -45,10 +92,24 @@ VERSION="$VERSION" SIGN_ID="$SIGN_ID" ./make-app.sh --no-launch
 if [ -n "$SIGN_ID" ]; then
     echo "==> Notarizing (this usually takes 1–5 minutes)…"
     ditto -c -k --norsrc --noextattr --noacl --keepParent dist/AgentsIsland.app /tmp/AgentsIsland-notarize.zip
-    xcrun notarytool submit /tmp/AgentsIsland-notarize.zip \
-        --keychain-profile "$NOTARY_PROFILE" --wait
+    # `notarytool submit --wait` exits 0 once processing *finishes* — including
+    # when the verdict is Invalid — so the status has to be read back, not
+    # inferred from the exit code.
+    SUBMIT_OUT=$(xcrun notarytool submit /tmp/AgentsIsland-notarize.zip \
+        --keychain-profile "$NOTARY_PROFILE" --wait 2>&1) || true
+    echo "$SUBMIT_OUT"
+    # Match only the final summary's "  status: X" — the progress lines read
+    # "Current status: In Progress", where $2 is "status:" rather than a verdict.
+    STATUS=$(echo "$SUBMIT_OUT" | awk '$1=="status:" {s=$2} END {print s}')
+    if [ "$STATUS" != "Accepted" ]; then
+        echo "FATAL: notarization did not succeed (status: ${STATUS:-unknown})." >&2
+        SUB_ID=$(echo "$SUBMIT_OUT" | awk '/^ *id:/ {print $2; exit}')
+        [ -n "$SUB_ID" ] && echo "       xcrun notarytool log $SUB_ID --keychain-profile $NOTARY_PROFILE" >&2
+        exit 1
+    fi
     xcrun stapler staple dist/AgentsIsland.app
     rm -f /tmp/AgentsIsland-notarize.zip
+    verify_notarized dist/AgentsIsland.app "built app"
 fi
 
 # ---- Package ------------------------------------------------------------------
@@ -59,12 +120,79 @@ ditto -c -k --norsrc --noextattr --noacl --keepParent dist/AgentsIsland.app Agen
 shasum -a 256 AgentsIsland.zip > AgentsIsland.zip.sha256
 SHA=$(cut -d' ' -f1 < AgentsIsland.zip.sha256)
 
+# Round-trip the zip through the same `unzip` users run. Verifying dist/ only
+# proves the app was fine *before* packaging; the ticket and the seal have to
+# survive the archive, and that is what actually reaches people.
+if [ -n "$SIGN_ID" ]; then
+    ZIPCHECK=$(mktemp -d)
+    unzip -q AgentsIsland.zip -d "$ZIPCHECK"
+    verify_notarized "$ZIPCHECK/AgentsIsland.app" "packaged AgentsIsland.zip"
+    rm -rf "$ZIPCHECK"
+fi
+
 # Drag-to-install .dmg, built from the app we just notarized+stapled above
 # (make-dmg reuses the stapled app, then signs + notarizes + staples the DMG).
 DMG="AgentsIsland-${VERSION}.dmg"
 VERSION="$VERSION" SIGN_ID="$SIGN_ID" NOTARY_PROFILE="$NOTARY_PROFILE" \
     ./scripts/make-dmg.sh --no-build
 shasum -a 256 "$DMG" > "$DMG.sha256"
+if [ -n "$SIGN_ID" ]; then verify_notarized "$DMG" "$DMG"; fi
+
+# ---- Sparkle appcast --------------------------------------------------------
+# The appcast is what in-app updaters poll. It is uploaded as an asset of this
+# release and served from the version-independent
+#   .../releases/latest/download/appcast.xml
+# so the feed URL baked into every build stays valid forever.
+#
+# generate_appcast signs each archive with the EdDSA private key held in the
+# login Keychain (same trust model as the notary credentials above). One-time
+# setup, if you have never cut a Sparkle release:
+#
+#   cd <repo root>   # the paths below are relative to it
+#   swift build      # populates .build/artifacts if it is not there yet
+#   .build/artifacts/sparkle/Sparkle/bin/generate_keys
+#   .build/artifacts/sparkle/Sparkle/bin/generate_keys -p > assets/sparkle-public-key.txt
+#
+# then commit assets/sparkle-public-key.txt. The private half never leaves the
+# Keychain and must never be committed.
+APPCAST=""
+SPARKLE_BIN=".build/artifacts/sparkle/Sparkle/bin"
+if [ -n "$SIGN_ID" ]; then
+    if [ ! -x "$SPARKLE_BIN/generate_appcast" ]; then
+        echo "FATAL: $SPARKLE_BIN/generate_appcast missing — run 'swift build' first." >&2
+        exit 1
+    fi
+    if [ ! -s assets/sparkle-public-key.txt ]; then
+        echo "FATAL: assets/sparkle-public-key.txt is missing or empty." >&2
+        echo "       Without it the shipped app has SUPublicEDKey=UNSET and every" >&2
+        echo "       user silently loses in-app updates. See the header above." >&2
+        exit 1
+    fi
+    # The app was built before this check ran; make sure the key actually made
+    # it into the bundle rather than discovering it after publishing.
+    BUILT_KEY=$(/usr/libexec/PlistBuddy -c "Print :SUPublicEDKey" \
+        dist/AgentsIsland.app/Contents/Info.plist 2>/dev/null || echo UNSET)
+    if [ "$BUILT_KEY" = "UNSET" ] || [ -z "$BUILT_KEY" ]; then
+        echo "FATAL: the built app has no Sparkle public key baked in." >&2
+        exit 1
+    fi
+
+    echo "==> Generating signed appcast"
+    CASTDIR=$(mktemp -d)
+    cp AgentsIsland.zip "$CASTDIR/AgentsIsland-${VERSION}.zip"
+    "$SPARKLE_BIN/generate_appcast" \
+        --download-url-prefix "https://github.com/mustafahalabi/agents-island/releases/download/$TAG/" \
+        --link "https://github.com/mustafahalabi/agents-island" \
+        --maximum-versions 10 \
+        "$CASTDIR"
+    APPCAST="$CASTDIR/appcast.xml"
+    [ -s "$APPCAST" ] || { echo "FATAL: appcast generation produced nothing." >&2; exit 1; }
+    # An appcast whose signature is empty would be rejected by every client.
+    grep -q 'sparkle:edSignature' "$APPCAST" || {
+        echo "FATAL: appcast has no EdDSA signature — is the private key in the Keychain?" >&2
+        exit 1; }
+    echo "    ✓ appcast signed"
+fi
 
 # ---- Tag + GitHub release -------------------------------------------------------
 echo "==> Tagging and releasing $TAG"
@@ -83,19 +211,48 @@ curl -fsSL https://raw.githubusercontent.com/mustafahalabi/agents-island/main/in
 \`\`\`"
 fi
 gh release create "$TAG" \
-    "$DMG" "$DMG.sha256" AgentsIsland.zip AgentsIsland.zip.sha256 \
+    "$DMG" "$DMG.sha256" AgentsIsland.zip AgentsIsland.zip.sha256 ${APPCAST:+"$APPCAST"} \
     --title "Agents Island $TAG" --generate-notes --notes "$NOTES"
 rm -f AgentsIsland.zip AgentsIsland.zip.sha256 "$DMG" "$DMG.sha256"
 
+# Existing installs poll .../releases/latest/download/appcast.xml, so the feed
+# only goes live once this release is the latest one. Confirm it actually
+# resolves — a missing asset silently strands every user on their old version.
+if [ -n "$APPCAST" ]; then
+    echo "==> Verifying the update feed is reachable"
+    FEED="https://github.com/mustafahalabi/agents-island/releases/latest/download/appcast.xml"
+    if curl -fsSL "$FEED" | grep -q "$VERSION"; then
+        echo "    ✓ feed serves $VERSION"
+    else
+        echo "WARNING: $FEED does not serve $VERSION yet." >&2
+        echo "         In-app updates will not offer this release until it does." >&2
+    fi
+    rm -rf "$CASTDIR"
+fi
+
 # ---- Bump the Homebrew cask ------------------------------------------------------
+# Only ever point the cask at a build that cleared verify_notarized above —
+# an unsigned build in the tap is worse than a stale one, because `brew install`
+# then hands every user an app macOS deletes on first launch.
+if [ -z "$SIGN_ID" ]; then
+    echo "==> Skipping cask bump: unsigned build stays out of the tap."
+    echo "==> Done: $TAG released (UNSIGNED), cask left at its previous version."
+    exit 0
+fi
+
 echo "==> Bumping cask to $VERSION ($SHA)"
-TMP=$(mktemp -d)
-trap 'rm -rf "$TMP"' EXIT
-git clone --quiet --depth 1 "https://github.com/mustafahalabi/homebrew-tap.git" "$TMP/tap"
-CASK="$TMP/tap/Casks/agents-island.rb"
+CASK="$TAPTMP/tap/Casks/agents-island.rb"
 sed -i '' -e "s/^  version \".*\"/  version \"$VERSION\"/" \
           -e "s/^  sha256 \".*\"/  sha256 \"$SHA\"/" "$CASK"
-git -C "$TMP/tap" commit -qam "agents-island $VERSION"
-git -C "$TMP/tap" push -q
+git -C "$TAPTMP/tap" commit -qam "agents-island $VERSION"
+if ! git -C "$TAPTMP/tap" push -q; then
+    echo "" >&2
+    echo "WARNING: $TAG is published but the cask bump FAILED to push." >&2
+    echo "         brew users stay on the previous version until this lands:" >&2
+    echo "           cd $TAPTMP/tap && git push" >&2
+    echo "         (that checkout is kept on purpose — do not delete it yet)" >&2
+    KEEP_TAP=1
+    exit 1
+fi
 
-echo "==> Done: $TAG released${SIGN_ID:+ (notarized)}, cask bumped."
+echo "==> Done: $TAG released (notarized), cask bumped to $VERSION."
