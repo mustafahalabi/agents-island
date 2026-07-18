@@ -62,10 +62,17 @@ final class UpdateController: NSObject, ObservableObject {
         self.controller = controller
 
         canCheck = controller.updater.canCheckForUpdates
+        // KVO fires off the main actor, and `canCheckForUpdates` is main-actor
+        // isolated, so the value can't be read here in the callback. Hop first,
+        // then read — and let the Task hold its own weak reference rather than
+        // reaching back through the closure's capture.
         canCheckObservation = controller.updater.observe(
             \.canCheckForUpdates, options: [.initial, .new]
-        ) { [weak self] updater, _ in
-            Task { @MainActor in self?.canCheck = updater.canCheckForUpdates }
+        ) { _, _ in
+            Task { @MainActor [weak self] in
+                guard let self, let controller = self.controller else { return }
+                self.canCheck = controller.updater.canCheckForUpdates
+            }
         }
     }
 
@@ -100,7 +107,9 @@ private final class UpdateDriverDelegate: NSObject, SPUStandardUserDriverDelegat
     ) {
         // Only steal focus for checks the user actually asked for. A scheduled
         // check that found something waits for them to come to it.
-        if state.userInitiated {
+        guard state.userInitiated else { return }
+        // Sparkle calls this from a nonisolated context; NSApp is main-actor.
+        Task { @MainActor in
             NSApp.activate(ignoringOtherApps: true)
         }
     }
