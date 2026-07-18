@@ -20,7 +20,7 @@ jobs:
     name: build
     runs-on: macos-14
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Build app bundle
         run: ./make-app.sh --no-launch
 
@@ -28,6 +28,6 @@ jobs:
     name: test
     runs-on: macos-14
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Run logic tests
         run: ./scripts/run-tests.sh
