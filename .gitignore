@@ -8,3 +8,13 @@ DerivedData/
 # Release artifacts
 AgentsIsland-*.dmg
 AgentsIsland.zip*
+appcast.xml
+
+# Sparkle signing key. The PUBLIC half (assets/sparkle-public-key.txt) is
+# committed on purpose — every build embeds it to verify updates. The PRIVATE
+# half must never be: whoever holds it can ship code to every user. It lives in
+# the login Keychain, and `generate_keys -x` exports it here temporarily when
+# backing it up, which is exactly when an `git add -A` would otherwise catch it.
+*private-key*
+*private_key*
+sparkle-private*
