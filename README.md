@@ -75,7 +75,12 @@ brew install --cask mustafahalabi/tap/agents-island
 curl -fsSL https://raw.githubusercontent.com/mustafahalabi/agents-island/main/install.sh | bash
 ```
 
-**Prebuilt** — grab `AgentsIsland.zip` from the [latest release](https://github.com/mustafahalabi/agents-island/releases/latest) and drag it to /Applications. Releases from v0.2.2 on are **signed and notarized** — they open like any Mac app, no warnings.
+**Prebuilt** — grab `AgentsIsland.zip` from the [latest release](https://github.com/mustafahalabi/agents-island/releases/latest) and drag it to /Applications. v0.2.2 and v0.4.6+ are **signed and notarized** — they open like any Mac app, no warnings.
+
+> [!WARNING]
+> **v0.3.0 through v0.4.5 are broken — don't use them.** They were signed but
+> never notarized, so macOS blocks them and moves the app to the Trash on first
+> launch. Upgrade to v0.4.6 or later.
 
 **From a checkout:**
 
