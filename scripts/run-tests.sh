@@ -41,6 +41,18 @@ run "InstallChannelTests" "$TMP/install" \
     Sources/AgentsIsland/InstallChannel.swift \
     scripts/tests/InstallChannelTests.swift
 
+run "ProjectPathTests" "$TMP/projpath" \
+    Sources/AgentsIsland/Agent.swift \
+    Sources/AgentsIsland/TailRead.swift \
+    Sources/AgentsIsland/ClaudeSessions.swift \
+    scripts/tests/ProjectPathTests.swift
+
+run "LastPromptTests" "$TMP/lastprompt" \
+    Sources/AgentsIsland/Agent.swift \
+    Sources/AgentsIsland/TailRead.swift \
+    Sources/AgentsIsland/ClaudeSessions.swift \
+    scripts/tests/LastPromptTests.swift
+
 # The three files below are likewise dependency-free on purpose: each holds
 # logic that used to sit inline in a file too entangled to test, and each was
 # extracted because it was silently losing user data.

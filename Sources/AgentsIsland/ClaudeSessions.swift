@@ -57,8 +57,36 @@ enum ClaudeSessions {
     }
 
     static func transcriptPath(for meta: Meta) -> String {
-        let encoded = String(meta.cwd.map { $0.isLetter || $0.isNumber ? $0 : "-" })
-        return home + "/.claude/projects/\(encoded)/\(meta.sessionId).jsonl"
+        home + "/.claude/projects/\(projectDirName(for: meta.cwd))/\(meta.sessionId).jsonl"
+    }
+
+    /// Claude Code's own encoding of a project path into a directory name.
+    ///
+    /// It applies `/[^a-zA-Z0-9]/g → "-"` per UTF-16 code unit. Verified against
+    /// the real CLI: a session in `/private/tmp/ai_probe_josé.test-dir` produced
+    /// `-private-tmp-ai-probe-jos--test-dir` — the underscore, the `é` and the
+    /// `.` each collapsing to a single dash.
+    ///
+    /// This used to test `isLetter || isNumber`, which is Unicode-wide: `é`,
+    /// CJK and even `²` all pass and were kept verbatim. Any project path with a
+    /// non-ASCII character therefore resolved to a directory that does not
+    /// exist, and the card showed no title, prompt, activity, model or todos —
+    /// permanently, with no error.
+    ///
+    /// Iterating UTF-16 code units rather than Characters matters: JavaScript's
+    /// regex works per code unit, so a decomposed `é` (e + combining accent)
+    /// yields `e-` there. Treating it as one Swift Character would produce `-`
+    /// and diverge again.
+    static func projectDirName(for cwd: String) -> String {
+        var out = String.UnicodeScalarView()
+        for unit in cwd.utf16 {
+            let isASCIIAlphanumeric =
+                (unit >= 48 && unit <= 57) ||    // 0-9
+                (unit >= 65 && unit <= 90) ||    // A-Z
+                (unit >= 97 && unit <= 122)      // a-z
+            out.append(isASCIIAlphanumeric ? Unicode.Scalar(unit)! : "-")
+        }
+        return String(out)
     }
 
     // MARK: - Task store (~/.claude/tasks/<sessionId>/<n>.json)
@@ -102,6 +130,9 @@ enum ClaudeSessions {
         var info = TranscriptInfo()
         var pendingTools: [(id: String, description: String)] = []
         var resolvedToolIds = Set<String>()
+        // Newest user text in the window; only consulted when the session's own
+        // last-prompt record didn't make it into the window.
+        var fallbackPrompt: String?
         var taskCalls: [(id: String, description: String, type: String?)] = []
         var questionCalls: [(id: String, question: PendingQuestion)] = []
 
@@ -164,15 +195,25 @@ enum ClaudeSessions {
                 for item in contentItems(obj) where item["type"] as? String == "tool_result" {
                     if let id = item["tool_use_id"] as? String { resolvedToolIds.insert(id) }
                 }
-                // Fallback prompt if no last-prompt entry is in the tail window.
-                if obj["isMeta"] as? Bool != true, info.lastPrompt == nil,
+                // Fallback prompt, used only if no last-prompt entry appears
+                // anywhere in the window. Keeping the *newest* matters: the old
+                // `info.lastPrompt == nil` guard made the first match win and
+                // never be overwritten, so whenever a single turn produced more
+                // than 512KB of tool results — routine on a large repo — the
+                // card showed the oldest user message still in the window
+                // instead of the most recent one.
+                if obj["isMeta"] as? Bool != true,
                    let text = userText(obj), !text.isEmpty {
-                    info.lastPrompt = text
+                    fallbackPrompt = text
                 }
             default:
                 break
             }
         }
+
+        // A `last-prompt` entry is authoritative wherever it sits in the window;
+        // the user-message fallback fills in only when none was present.
+        if info.lastPrompt == nil { info.lastPrompt = fallbackPrompt }
 
         info.activity = pendingTools.last(where: { !resolvedToolIds.contains($0.id) })?.description
         // The most recent still-unanswered question. NOTE: Claude Code writes the
