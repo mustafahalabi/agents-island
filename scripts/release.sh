@@ -138,6 +138,60 @@ VERSION="$VERSION" SIGN_ID="$SIGN_ID" NOTARY_PROFILE="$NOTARY_PROFILE" \
 shasum -a 256 "$DMG" > "$DMG.sha256"
 if [ -n "$SIGN_ID" ]; then verify_notarized "$DMG" "$DMG"; fi
 
+# ---- Sparkle appcast --------------------------------------------------------
+# The appcast is what in-app updaters poll. It is uploaded as an asset of this
+# release and served from the version-independent
+#   .../releases/latest/download/appcast.xml
+# so the feed URL baked into every build stays valid forever.
+#
+# generate_appcast signs each archive with the EdDSA private key held in the
+# login Keychain (same trust model as the notary credentials above). One-time
+# setup, if you have never cut a Sparkle release:
+#
+#   .build/artifacts/sparkle/Sparkle/bin/generate_keys
+#   .build/artifacts/sparkle/Sparkle/bin/generate_keys -p > assets/sparkle-public-key.txt
+#
+# then commit assets/sparkle-public-key.txt. The private half never leaves the
+# Keychain and must never be committed.
+APPCAST=""
+SPARKLE_BIN=".build/artifacts/sparkle/Sparkle/bin"
+if [ -n "$SIGN_ID" ]; then
+    if [ ! -x "$SPARKLE_BIN/generate_appcast" ]; then
+        echo "FATAL: $SPARKLE_BIN/generate_appcast missing — run 'swift build' first." >&2
+        exit 1
+    fi
+    if [ ! -s assets/sparkle-public-key.txt ]; then
+        echo "FATAL: assets/sparkle-public-key.txt is missing or empty." >&2
+        echo "       Without it the shipped app has SUPublicEDKey=UNSET and every" >&2
+        echo "       user silently loses in-app updates. See the header above." >&2
+        exit 1
+    fi
+    # The app was built before this check ran; make sure the key actually made
+    # it into the bundle rather than discovering it after publishing.
+    BUILT_KEY=$(/usr/libexec/PlistBuddy -c "Print :SUPublicEDKey" \
+        dist/AgentsIsland.app/Contents/Info.plist 2>/dev/null || echo UNSET)
+    if [ "$BUILT_KEY" = "UNSET" ] || [ -z "$BUILT_KEY" ]; then
+        echo "FATAL: the built app has no Sparkle public key baked in." >&2
+        exit 1
+    fi
+
+    echo "==> Generating signed appcast"
+    CASTDIR=$(mktemp -d)
+    cp AgentsIsland.zip "$CASTDIR/AgentsIsland-${VERSION}.zip"
+    "$SPARKLE_BIN/generate_appcast" \
+        --download-url-prefix "https://github.com/mustafahalabi/agents-island/releases/download/$TAG/" \
+        --link "https://github.com/mustafahalabi/agents-island" \
+        --maximum-versions 10 \
+        "$CASTDIR"
+    APPCAST="$CASTDIR/appcast.xml"
+    [ -s "$APPCAST" ] || { echo "FATAL: appcast generation produced nothing." >&2; exit 1; }
+    # An appcast whose signature is empty would be rejected by every client.
+    grep -q 'sparkle:edSignature' "$APPCAST" || {
+        echo "FATAL: appcast has no EdDSA signature — is the private key in the Keychain?" >&2
+        exit 1; }
+    echo "    ✓ appcast signed"
+fi
+
 # ---- Tag + GitHub release -------------------------------------------------------
 echo "==> Tagging and releasing $TAG"
 git tag "$TAG" 2>/dev/null || echo "    (tag exists, reusing)"
@@ -155,9 +209,24 @@ curl -fsSL https://raw.githubusercontent.com/mustafahalabi/agents-island/main/in
 \`\`\`"
 fi
 gh release create "$TAG" \
-    "$DMG" "$DMG.sha256" AgentsIsland.zip AgentsIsland.zip.sha256 \
+    "$DMG" "$DMG.sha256" AgentsIsland.zip AgentsIsland.zip.sha256 ${APPCAST:+"$APPCAST"} \
     --title "Agents Island $TAG" --generate-notes --notes "$NOTES"
 rm -f AgentsIsland.zip AgentsIsland.zip.sha256 "$DMG" "$DMG.sha256"
+
+# Existing installs poll .../releases/latest/download/appcast.xml, so the feed
+# only goes live once this release is the latest one. Confirm it actually
+# resolves — a missing asset silently strands every user on their old version.
+if [ -n "$APPCAST" ]; then
+    echo "==> Verifying the update feed is reachable"
+    FEED="https://github.com/mustafahalabi/agents-island/releases/latest/download/appcast.xml"
+    if curl -fsSL "$FEED" | grep -q "$VERSION"; then
+        echo "    ✓ feed serves $VERSION"
+    else
+        echo "WARNING: $FEED does not serve $VERSION yet." >&2
+        echo "         In-app updates will not offer this release until it does." >&2
+    fi
+    rm -rf "$CASTDIR"
+fi
 
 # ---- Bump the Homebrew cask ------------------------------------------------------
 # Only ever point the cask at a build that cleared verify_notarized above —
