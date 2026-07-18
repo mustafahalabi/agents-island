@@ -28,19 +28,20 @@ struct AgentDetectionTests {
         expect("deepcode", .deepseek)          // real command name
         expect("grok", .grok); expect("grok-cli", .grok)
         expect("vibe", .mistral)               // Mistral's command is `vibe`
-        expect("agy", .antigravity)            // Antigravity's command is `agy`
-        expect("qodercli", .qoder)
-        expect("codebuddy", .codebuddy)
-        expect("trae-cli", .trae); expect("trae-agent", .trae)
-        expect("kiro-cli", .kiro)
-        expect("gjc", .gajae)
-        expect("mimo", .mimo)
+        expect("opencode", .opencode)
+        expect("copilot", .copilot)
 
         // GUI-only tools and collisions must NOT be detected.
         expect("zed", nil)                     // GUI editor, no agent CLI
         expect("windsurf", nil)                // GUI editor
         expect("glm", nil)                     // no standalone CLI
         expect("hermes", nil)                  // collides with the RN Hermes VM
+
+        // Pruned agents (removed from the tracked set) must not be detected.
+        for command in ["aider", "goose", "amp", "droid", "antigravity", "agy",
+                        "qodercli", "codebuddy", "trae-cli", "kiro-cli", "gjc", "mimo"] {
+            expect(command, nil)
+        }
 
         // Non-agents.
         for command in ["node", "python", "python3", "bash", "sh", "go", "grep", "ssh", "vim"] {
