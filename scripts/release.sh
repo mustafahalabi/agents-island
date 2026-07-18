@@ -148,6 +148,8 @@ if [ -n "$SIGN_ID" ]; then verify_notarized "$DMG" "$DMG"; fi
 # login Keychain (same trust model as the notary credentials above). One-time
 # setup, if you have never cut a Sparkle release:
 #
+#   cd <repo root>   # the paths below are relative to it
+#   swift build      # populates .build/artifacts if it is not there yet
 #   .build/artifacts/sparkle/Sparkle/bin/generate_keys
 #   .build/artifacts/sparkle/Sparkle/bin/generate_keys -p > assets/sparkle-public-key.txt
 #
