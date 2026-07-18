@@ -132,6 +132,11 @@ final class AgentMonitor: ObservableObject {
         let agentKindByPid = Dictionary(uniqueKeysWithValues: candidates.map { ($0.pid, $0.kind) })
         let rows = candidates.filter { agentKindByPid[$0.ppid] != $0.kind }
 
+        // Retire pid → rollout mappings for codex processes that have exited.
+        // Left unpruned, a recycled pid inherits the previous session's rollout
+        // and the card shows that conversation instead. See RolloutAssignment.
+        CodexSessions.prune(livePids: Set(rows.filter { $0.kind == .codex }.map(\.pid)))
+
         let claudeMetas = ClaudeSessions.sessionsByPid()
         let needCwd = rows.filter { $0.kind != .claude || claudeMetas[$0.pid] == nil }.map(\.pid)
         let cwds = cwdByPid(needCwd)

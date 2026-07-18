@@ -111,15 +111,36 @@ final class RemoteMonitor: ObservableObject {
         }
     }
 
+    /// Collapses repeat requests while one is already waiting to run.
+    ///
+    /// The 10s timer used to enqueue unconditionally. With a few slow or
+    /// unreachable hosts a single pass already exceeds 10s (two ssh round trips
+    /// each), so blocks piled up on the serial queue without bound and ssh
+    /// processes spawned continuously. At most one scan now waits behind the
+    /// one in flight.
+    private let scanGate = NSLock()
+    private var scanQueued = false
+
     func scanSoon() {
-        queue.async { [weak self] in self?.scanAll() }
+        scanGate.lock()
+        if scanQueued { scanGate.unlock(); return }
+        scanQueued = true
+        scanGate.unlock()
+
+        queue.async { [weak self] in
+            guard let self else { return }
+            self.scanGate.lock()
+            self.scanQueued = false
+            self.scanGate.unlock()
+            self.scanAll()
+        }
     }
 
     /// Force an immediate re-scan of one host and mark it "checking" right away
     /// so the Settings row gives instant feedback on a "Test" tap.
     func testConnection(host: String) {
         publish(host: host) { $0.reachability = .checking }
-        queue.async { [weak self] in self?.scanAll() }
+        scanSoon()   // through the gate — repeated taps must not stack up scans
     }
 
     /// Thread-safe snapshot merged by AgentMonitor on every local scan.
@@ -273,16 +294,12 @@ final class RemoteMonitor: ObservableObject {
     /// fails, poisoning the command's exit code even though `ps` ran fine. The
     /// caller's `__AI_SCAN_OK__` sentinel is the real success signal; a failed
     /// connection / auth produces no sentinel (and usually empty stdout) anyway.
+    /// Hard ceiling per ssh invocation. ssh's own ConnectTimeout only covers the
+    /// TCP connect, so a host that connects and then stalls in key exchange or
+    /// auth used to block this thread — and therefore every other host — forever.
+    private static let sshTimeout: TimeInterval = 15
+
     private func run(_ path: String, _ arguments: [String]) -> String? {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: path)
-        process.arguments = arguments
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = FileHandle.nullDevice
-        guard (try? process.run()) != nil else { return nil }
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-        return String(data: data, encoding: .utf8)
+        Subprocess.run(path, arguments, timeout: Self.sshTimeout)
     }
 }

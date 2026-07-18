@@ -56,6 +56,16 @@ run "HookSettingsTests" "$TMP/hooks" \
     Sources/AgentsIsland/HookSettings.swift \
     scripts/tests/HookSettingsTests.swift
 
+run "RolloutAssignmentTests" "$TMP/rollout" \
+    Sources/AgentsIsland/RolloutAssignment.swift \
+    scripts/tests/RolloutAssignmentTests.swift
+
+# Spawns real child processes (sleep/echo) — no network, but it does wait out a
+# 2s timeout, so this suite is the slow one.
+run "SubprocessTests" "$TMP/subproc" \
+    Sources/AgentsIsland/Subprocess.swift \
+    scripts/tests/SubprocessTests.swift
+
 if [ "$fail" = 0 ]; then
     echo "✅ all test suites passed"
 else

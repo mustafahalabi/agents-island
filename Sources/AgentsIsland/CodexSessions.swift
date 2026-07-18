@@ -30,6 +30,26 @@ enum CodexSessions {
     private static var metaCwdCache: [String: String?] = [:]
     private static let lock = NSLock()
 
+    /// Forget pid → rollout mappings for processes that are no longer running.
+    ///
+    /// Without this the cache only ever grew, and `fileExists` never expired an
+    /// entry because rollout files are never deleted. Two things went wrong:
+    ///
+    /// - macOS recycles pids freely, so a *new* codex session landing on a
+    ///   retired pid inherited the previous session's rollout and displayed its
+    ///   prompt, activity, model and plan indefinitely.
+    /// - `rolloutMatching` treats every cached value as already claimed, so a
+    ///   rollout held by a long-dead pid stayed permanently reserved. A fresh
+    ///   session in a directory that had an earlier one found its own rollout
+    ///   taken and fell back to an older conversation.
+    ///
+    /// Called once per scan with the pids currently detected as codex.
+    static func prune(livePids: Set<Int32>) {
+        lock.lock()
+        pidCache = RolloutAssignment.pruned(pidCache, livePids: livePids)
+        lock.unlock()
+    }
+
     /// Best-effort rollout path for a running codex process.
     static func rolloutPath(pid: Int32, cwd: String?) -> String? {
         lock.lock()
@@ -59,13 +79,17 @@ enum CodexSessions {
     }
 
     /// Fallback: most recent rollout whose session_meta cwd matches.
+    ///
+    /// `assigned` is only meaningful because `prune(livePids:)` keeps the cache
+    /// to live processes — otherwise it accumulates rollouts claimed by dead
+    /// pids and starves new sessions of their own.
     private static func rolloutMatching(cwd: String?) -> String? {
         guard let cwd, !cwd.isEmpty else { return nil }
         lock.lock()
         let assigned = Set(pidCache.values)
         lock.unlock()
-        let candidates = recentRollouts().filter { $0.cwd == cwd }
-        return (candidates.first { !assigned.contains($0.path) } ?? candidates.first)?.path
+        let candidates = recentRollouts().filter { $0.cwd == cwd }.map(\.path)
+        return RolloutAssignment.select(candidates: candidates, assigned: assigned)
     }
 
     /// Rollouts modified in the last 48h, newest first. The directory walk is
