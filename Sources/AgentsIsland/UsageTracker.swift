@@ -126,8 +126,12 @@ final class UsageTracker: ObservableObject {
         // Rate-limit events are small and near the end; the last 128KB is plenty.
         let size = (try? handle.seekToEnd()) ?? 0
         try? handle.seek(toOffset: size > 131_072 ? size - 131_072 : 0)
-        guard let data = try? handle.readToEnd(),
-              let text = String(data: data, encoding: .utf8) else { return }
+        guard let data = try? handle.readToEnd() else { return }
+        // Lossy on purpose — the window can begin mid-character. A strict
+        // decode failed the whole read, blanking the Codex usage meter. See
+        // TailRead. The garbled first line simply fails to parse as JSON, as
+        // a partial line always did.
+        let text = TailRead.decode(data)
 
         var rate: [String: Any]?
         for line in text.split(separator: "\n") where line.contains("\"rate_limits\"") {

@@ -234,54 +234,46 @@ final class ApprovalCenter: ObservableObject {
         try? fm.createDirectory(atPath: spoolDir, withIntermediateDirectories: true)
 
         // BSD date has no %N — epoch + pid + RANDOM is unique enough.
+        //
+        // Written to a dot-prefixed temp file and moved into place: the island
+        // polls this directory once a second and drops anything that does not
+        // parse, so a payload caught mid-write was a permission request that
+        // silently never appeared. `mv` within one directory is atomic, and the
+        // leading dot keeps the partial file out of the *.json scan.
         let script = """
         #!/bin/bash
         # Installed by Agents Island — forwards Claude Code notifications
         # (permission requests) to the island. Safe to delete.
         dir="$HOME/.claude/agents-island/notifications"
         mkdir -p "$dir"
-        cat > "$dir/$(date +%s)-$$-$RANDOM.json"
+        name="$(date +%s)-$$-$RANDOM.json"
+        tmp="$dir/.$name.partial"
+        cat > "$tmp" && mv -f "$tmp" "$dir/$name" || rm -f "$tmp"
         """
         guard fm.createFile(atPath: hookScriptPath, contents: Data(script.utf8),
                             attributes: [.posixPermissions: 0o755])
         else { return false }
 
-        // Merge into ~/.claude/settings.json — PermissionRequest (rich, has
-        // tool_name) plus Notification (fallback on older Claude versions),
-        // and the AskUserQuestion lifecycle (PreToolUse fires when the prompt
-        // opens with the full options; PostToolUse when it's answered).
-        var root: [String: Any] = [:]
-        if let data = fm.contents(atPath: claudeSettingsPath) {
-            root = ((try? JSONSerialization.jsonObject(with: data)) as? [String: Any]) ?? [:]
-            try? fm.copyItem(atPath: claudeSettingsPath,
-                             toPath: claudeSettingsPath + ".agents-island-backup")
+        // Merge into ~/.claude/settings.json. That file is the user's, not
+        // ours — it holds their permission rules, env and model settings — so
+        // a settings file we cannot parse is a hard stop rather than something
+        // to overwrite. Treating an unparseable file as an empty one silently
+        // destroyed every setting in it.
+        let root: [String: Any]
+        switch HookSettings.load(data: fm.contents(atPath: claudeSettingsPath)) {
+        case .missing:
+            root = [:]
+        case .parsed(let existing):
+            root = existing
+            backUpSettings()
+        case .unreadable:
+            NSLog("[AgentsIsland] refusing to install the hook: %@ is not valid JSON. "
+                  + "Fix or move it, then try again.", claudeSettingsPath)
+            return false
         }
-        var hooks = root["hooks"] as? [String: Any] ?? [:]
-        let events: [(name: String, matcher: String?)] = [
-            ("PermissionRequest", nil),
-            ("Notification", nil),
-            ("PreToolUse", "AskUserQuestion"),
-            ("PostToolUse", "AskUserQuestion"),
-        ]
-        for event in events {
-            var entries = hooks[event.name] as? [[String: Any]] ?? []
-            let alreadyThere = entries.contains { entry in
-                ((entry["hooks"] as? [[String: Any]]) ?? [])
-                    .contains { ($0["command"] as? String)?.contains("agents-island") == true }
-            }
-            if !alreadyThere {
-                var entry: [String: Any] = [
-                    "hooks": [["type": "command", "command": hookScriptPath, "async": true]]
-                ]
-                if let matcher = event.matcher { entry["matcher"] = matcher }
-                entries.append(entry)
-            }
-            hooks[event.name] = entries
-        }
-        root["hooks"] = hooks
 
-        guard let out = try? JSONSerialization.data(
-            withJSONObject: root, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
+        guard let out = HookSettings.serialize(
+            HookSettings.merged(into: root, hookPath: hookScriptPath))
         else { return false }
         return fm.createFile(atPath: claudeSettingsPath, contents: out)
     }
@@ -289,30 +281,34 @@ final class ApprovalCenter: ObservableObject {
     @discardableResult
     static func uninstallHook() -> Bool {
         let fm = FileManager.default
-        guard let data = fm.contents(atPath: claudeSettingsPath),
-              var root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
-              var hooks = root["hooks"] as? [String: Any]
-        else { return true }
-
-        for eventName in ["PermissionRequest", "Notification", "PreToolUse", "PostToolUse"] {
-            guard var entries = hooks[eventName] as? [[String: Any]] else { continue }
-            entries.removeAll { entry in
-                ((entry["hooks"] as? [[String: Any]]) ?? [])
-                    .contains { ($0["command"] as? String)?.contains("agents-island") == true }
-            }
-            if entries.isEmpty {
-                hooks.removeValue(forKey: eventName)
-            } else {
-                hooks[eventName] = entries
-            }
+        let root: [String: Any]
+        switch HookSettings.load(data: fm.contents(atPath: claudeSettingsPath)) {
+        case .missing:
+            try? fm.removeItem(atPath: hookScriptPath)
+            return true                       // nothing registered anywhere
+        case .parsed(let existing):
+            root = existing
+        case .unreadable:
+            // Same reasoning as install: never rewrite a file we can't read.
+            NSLog("[AgentsIsland] refusing to edit %@ — not valid JSON. "
+                  + "Remove the agents-island hook entry by hand.", claudeSettingsPath)
+            return false
         }
-        if hooks.isEmpty { root.removeValue(forKey: "hooks") } else { root["hooks"] = hooks }
 
-        guard let out = try? JSONSerialization.data(
-            withJSONObject: root, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
+        guard let out = HookSettings.serialize(HookSettings.removed(from: root))
         else { return false }
         try? fm.removeItem(atPath: hookScriptPath)
         return fm.createFile(atPath: claudeSettingsPath, contents: out)
+    }
+
+    /// Keep a copy before rewriting. `copyItem` refuses to overwrite, so a
+    /// backup from an earlier install would otherwise stick around forever and
+    /// the pre-change state would be lost on the second run.
+    private static func backUpSettings() {
+        let fm = FileManager.default
+        let backup = claudeSettingsPath + ".agents-island-backup"
+        guard let data = fm.contents(atPath: claudeSettingsPath) else { return }
+        try? data.write(to: URL(fileURLWithPath: backup))
     }
 }
 

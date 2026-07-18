@@ -119,7 +119,10 @@ final class AgentMonitor: ObservableObject {
                   let cpu = Double(parts[2]) else { continue }
             let tty = parts[3] == "??" ? nil : String(parts[3])
             let args = String(parts[5])
-            procs[pid] = ProcInfo(ppid: ppid, command: String(args.split(separator: " ").first ?? ""))
+            // Store the full args, not a space-split first token: app bundle
+            // paths contain spaces, and truncating there lost VS Code, Cursor
+            // and Windsurf entirely. See ProcessNaming.
+            procs[pid] = ProcInfo(ppid: ppid, command: args)
             if let kind = detect(args: args), !disabled.contains(kind), !isHeadless(tty: tty, args: args) {
                 candidates.append((pid, ppid, cpu, tty, String(parts[4]), args, kind))
             }
@@ -309,21 +312,11 @@ final class AgentMonitor: ObservableObject {
             current = info.ppid
             guard let parent = procs[current] else { return nil }
 
-            if let appName = appBundleName(from: parent.command) {
+            if let appName = ProcessNaming.appBundleName(fromCommand: parent.command) {
                 return appName
             }
-            let base = basename(parent.command).lowercased()
+            let base = ProcessNaming.executableBasename(parent.command)
             if ["tmux", "screen", "zellij"].contains(base) { return base }
-        }
-        return nil
-    }
-
-    private static func appBundleName(from command: String) -> String? {
-        for component in command.split(separator: "/") where component.hasSuffix(".app") {
-            var name = String(component.dropLast(4))
-            if name == "Visual Studio Code" { name = "VS Code" }
-            if name == "iTerm2" { name = "iTerm" }
-            return name
         }
         return nil
     }

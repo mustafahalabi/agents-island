@@ -179,14 +179,39 @@ enum TerminalBridge {
     /// Is the given terminal/editor app currently frontmost? Names are fuzzy —
     /// our detector says "iTerm"/"VS Code" while macOS reports "iTerm2"/"Code".
     static func isFrontmost(appNamed name: String?) -> Bool {
-        guard let name, !name.isEmpty,
-              let front = NSWorkspace.shared.frontmostApplication?.localizedName
-        else { return false }
-        let f = front.lowercased()
+        matches(appNamed: name, frontmost: NSWorkspace.shared.frontmostApplication?.localizedName)
+    }
+
+    /// The name-matching half, separated from NSWorkspace so it can be tested.
+    ///
+    /// A false positive here is not cosmetic: smart suppression uses this to
+    /// decide you are already watching the agent's terminal, and silently drops
+    /// the completion notification and auto-expand. The old rule matched any
+    /// substring in either direction and special-cased "vs code" to any name
+    /// containing "code" — so with an agent in VS Code and Xcode frontmost, it
+    /// answered true and swallowed the notification.
+    static func matches(appNamed name: String?, frontmost: String?) -> Bool {
+        guard let name, !name.isEmpty, let frontmost, !frontmost.isEmpty else { return false }
+        let f = frontmost.lowercased()
         let t = name.lowercased()
-        if f.contains(t) || t.contains(f) { return true }
-        if t == "vs code" { return f.contains("code") }
-        return false
+
+        if f == t { return true }
+
+        // Known aliases where macOS's name differs from our detector's. Kept
+        // explicit — substring matching is what caused the false positives.
+        let aliases: [String: Set<String>] = [
+            "vs code": ["code", "visual studio code", "code - insiders"],
+            "iterm":   ["iterm2"],
+            "cursor":  ["cursor"],
+        ]
+        if let known = aliases[t], known.contains(f) { return true }
+        if let known = aliases[f], known.contains(t) { return true }
+
+        // Fall back to a prefix relationship rather than "contains anywhere",
+        // so "Code" no longer matches "Xcode". Guarded by a length floor so
+        // very short names can't match half the Dock.
+        guard min(f.count, t.count) >= 4 else { return false }
+        return f.hasPrefix(t) || t.hasPrefix(f)
     }
 
     // MARK: - tmux
