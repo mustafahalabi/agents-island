@@ -175,7 +175,10 @@ enum CodexSessions {
             case "event_msg":
                 handleEvent(payload, info: &info)
             // Older flat format: response items at the top level.
-            case "message", "function_call", "function_call_output", "local_shell_call", "reasoning":
+            // "local_shell_call_output" was missing here, so shell results were
+            // dropped before handleItem ever saw them.
+            case "message", "function_call", "function_call_output",
+                 "local_shell_call", "local_shell_call_output", "reasoning":
                 var item = payload
                 item["type"] = type
                 handleItem(item, info: &info, pending: &pendingCalls, resolved: &resolvedCallIds)
@@ -221,10 +224,26 @@ enum CodexSessions {
             let action = item["action"] as? [String: Any]
             let command = (action?["command"] as? [String]) ?? []
             pending.append((id, describeShell(command)))
-        case "function_call_output":
-            if let id = item["call_id"] as? String { resolved.insert(id) }
         default:
-            break
+            // Any *_call_output resolves the call it names.
+            //
+            // Only "function_call_output" was handled, so shell results —
+            // written as "local_shell_call_output" — fell through here and
+            // every completed shell call stayed pending forever. Once the
+            // task_complete event scrolled out of the 256KB window (a long turn
+            // with large tool output), phase was .unknown, the unresolved call
+            // forced it to .working, and the card showed "Running <an old
+            // command>" while Codex sat idle at the prompt.
+            //
+            // Matching on the suffix rather than listing types also covers
+            // custom tool outputs without needing another edit here.
+            if let type = item["type"] as? String, type.hasSuffix("_call_output") {
+                // The call side falls back to "id" when "call_id" is absent, so
+                // the output side has to as well or the two never match.
+                if let id = item["call_id"] as? String ?? item["id"] as? String {
+                    resolved.insert(id)
+                }
+            }
         }
     }
 
