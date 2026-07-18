@@ -60,7 +60,16 @@ final class AgentMonitor: ObservableObject {
                 // already running would otherwise "start" at once.
                 if !firstScan {
                     for session in found {
+                        // Remote sessions are judged purely by CPU regardless of
+                        // kind: RemoteMonitor only ever reports .working or
+                        // .idle, so a remote Claude/Codex/Gemini can never reach
+                        // .waiting and the (.working, .waiting) completion case
+                        // below never fires for one. Gating on kind alone meant
+                        // those agents played the acknowledge sound when they
+                        // started but never the task-complete sound, while
+                        // remote Qwen/Grok did.
                         let cpuOnly = !Self.richStatusKinds.contains(session.kind)
+                            || session.remoteHost != nil
                         switch (previous[session.id], session.status) {
                         case (nil, _):
                             NotificationCenter.default.post(name: .agentStarted, object: session.id)

@@ -72,6 +72,10 @@ run "RolloutAssignmentTests" "$TMP/rollout" \
     Sources/AgentsIsland/RolloutAssignment.swift \
     scripts/tests/RolloutAssignmentTests.swift
 
+run "RemoteCPUTests" "$TMP/remotecpu" \
+    Sources/AgentsIsland/RemoteCPU.swift \
+    scripts/tests/RemoteCPUTests.swift
+
 run "CodexPhaseTests" "$TMP/codexphase" \
     Sources/AgentsIsland/Agent.swift \
     Sources/AgentsIsland/TailRead.swift \
