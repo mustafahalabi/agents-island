@@ -70,6 +70,11 @@ enum Pref {
     // MARK: Agents
     static let disabledAgents = "disabledAgents"        // CSV of AgentKind rawValues
 
+    // MARK: Updates
+    // Sparkle owns the real setting (SUEnableAutomaticChecks); this mirrors it
+    // so the Settings toggle has something to bind to.
+    static let autoCheckUpdates = "autoCheckUpdates"    // background update checks
+
     static func registerDefaults() {
         UserDefaults.standard.register(defaults: [
             expandOnHover: true,
@@ -125,6 +130,8 @@ enum Pref {
             reverseSwitcher: true,
 
             disabledAgents: "",
+
+            autoCheckUpdates: true,
         ])
     }
 

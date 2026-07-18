@@ -30,8 +30,14 @@ release is out.
 Agents Island runs locally and reads files your AI coding agents already write
 to disk. Things that are especially interesting to report:
 
-- Anything that causes data to leave the machine — the app is designed to make
-  zero outbound network calls except SSH scans the user explicitly configures
+- Anything that causes agent data to leave the machine. The app makes only two
+  kinds of outbound connection: the daily Sparkle update check against GitHub
+  Releases, and SSH scans of hosts the user explicitly configured. Anything else
+  is a bug worth reporting.
+- Issues in the update path — appcast parsing, EdDSA signature verification, the
+  embedded Sparkle helpers, or anything that could let an attacker serve a
+  malicious update. This is the highest-severity area in the app: it installs
+  executable code.
 - Command injection through session data, file paths, git branch names, or any
   other content read from agent transcripts
 - Issues in the terminal bridge — the code that jumps to a tty, sends text, or

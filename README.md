@@ -48,6 +48,10 @@ Native SwiftUI. No Electron, no dock icon, no cloud — everything is read from 
 **🌐 SSH remotes**
 - Add `user@server` hosts and agents running on remote machines appear in the island with a host chip. Key-auth `BatchMode` scans — it never password-prompts.
 
+**🔄 Automatic updates**
+- Checks once a day and offers the new version in place — signed appcast, EdDSA-verified download, nothing installed without your confirmation.
+- Installed with Homebrew? It detects the cask and defers to `brew upgrade --cask agents-island` instead, so the two never fight.
+
 **⚙️ Settings for everything**
 - A full sidebar settings window: hover behavior, dismissal, display picker for multi-screen setups, panel sizing and fonts, per-card toggles, notch fine-tuning, sounds, usage plan, per-agent enable/disable, shortcuts, SSH hosts.
 
@@ -113,7 +117,13 @@ Everything is local. The key insight is that coding agents already publish their
 
 Transcript parsing reads only the file tails (agent transcripts grow to 100MB+) and caches by mtime; the usage tracker backfills once and then reads only appended bytes. Polling is every 2s (configurable) on a utility queue, and the UI only updates when something actually changed.
 
-Nothing ever leaves your Mac.
+Your agent data never leaves your Mac — no telemetry, no analytics, no cloud sync.
+
+The one network connection the app makes is the update check: once a day it
+fetches a signed appcast from GitHub Releases, and downloads are verified
+against the project's EdDSA key before anything is installed. It sends nothing
+but the request itself, and you can turn it off in **Settings → About**.
+Homebrew installs skip it entirely and defer to `brew upgrade`.
 
 ---
 
