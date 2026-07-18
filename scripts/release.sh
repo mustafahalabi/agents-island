@@ -25,15 +25,23 @@ NOTARY_PROFILE="${NOTARY_PROFILE:-agents-island}"
 # gets uploaded until the artifact users actually download passes spctl.
 verify_notarized() {
     local target="$1" label="$2"
+    # spctl assessment type depends on the artifact: an .app is judged as an
+    # executable, a .dmg as a document you open. Using -t exec on a disk image
+    # reports "does not seem to be an app" for a perfectly good DMG.
+    local -a assess
+    case "$target" in
+        *.dmg) assess=(-a -t open --context context:primary-signature) ;;
+        *)     assess=(-a -t exec) ;;
+    esac
     echo "==> Verifying $label"
     if ! xcrun stapler validate "$target" >/dev/null 2>&1; then
         echo "FATAL: $label has no stapled notarization ticket." >&2
         echo "       Gatekeeper will block it. Refusing to publish." >&2
         exit 1
     fi
-    if ! spctl -a -t exec "$target" >/dev/null 2>&1; then
+    if ! spctl "${assess[@]}" "$target" >/dev/null 2>&1; then
         echo "FATAL: $label is rejected by Gatekeeper:" >&2
-        spctl -a -t exec -vv "$target" 2>&1 | sed 's/^/       /' >&2
+        spctl "${assess[@]}" -vv "$target" 2>&1 | sed 's/^/       /' >&2
         exit 1
     fi
     echo "    ✓ $label: notarized, stapled, Gatekeeper-accepted"
