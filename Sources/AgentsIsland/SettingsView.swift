@@ -1252,6 +1252,23 @@ private struct AboutPane: View {
         return "Last checked \(f.localizedString(for: date, relativeTo: Date()))"
     }
 
+    /// Explains the channel rather than repeating the row above it.
+    private var updatesFooter: String {
+        switch updater.channel {
+        case .homebrew:
+            return "Homebrew installed this copy, so it also updates it. "
+                + "Updating in place here would leave the cask pointing at a version "
+                + "you no longer have, and the next `brew upgrade` would fight it."
+        case .unsigned:
+            return "Builds made from source carry no signing key, so an update "
+                + "couldn't be verified before installing. Rebuild to update."
+        case .direct:
+            return "Checks GitHub for new releases. Downloads are verified against "
+                + "the project's signing key before anything is installed — this is "
+                + "the app's only network connection, and no session data is ever sent."
+        }
+    }
+
     /// The real bundle version, so the About pane never lies about the build.
     static var appVersion: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev"
@@ -1278,14 +1295,26 @@ private struct AboutPane: View {
                 .padding(.vertical, 22)
             }
 
-            SSection(title: "Updates",
-                     footer: updater.unavailableReason
-                     ?? "Checks GitHub for new releases. Downloads are verified against the project's signing key before anything is installed — this is the app's only network connection, and no session data is ever sent.") {
-                if let reason = updater.unavailableReason {
-                    SRow(title: "Automatic updates unavailable", subtitle: reason) {
-                        Image(systemName: "info.circle.fill").foregroundStyle(.secondary)
+            SSection(title: "Updates", footer: updatesFooter) {
+                switch updater.channel {
+                case .homebrew:
+                    // Not a failure: self-updating would desync the Caskroom
+                    // manifest and the next `brew upgrade` would fight the
+                    // replaced app. Say that plainly and hand over the command.
+                    SRow(title: "Managed by Homebrew",
+                         subtitle: UpdateController.brewUpgradeCommand) {
+                        Button("Copy") {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(UpdateController.brewUpgradeCommand,
+                                                           forType: .string)
+                        }
                     }
-                } else {
+                case .unsigned:
+                    SRow(title: "Updates off in this build",
+                         subtitle: "No signing key, so a download can't be verified") {
+                        Image(systemName: "hammer.fill").foregroundStyle(.secondary)
+                    }
+                case .direct:
                     SRow(title: "Check for updates automatically",
                          subtitle: lastChecked) {
                         Toggle("", isOn: $autoCheckUpdates)
