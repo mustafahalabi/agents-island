@@ -33,26 +33,19 @@ final class UpdateController: NSObject, ObservableObject {
     @Published private(set) var canCheck = false
     private var canCheckObservation: NSKeyValueObservation?
 
-    /// Why the updater is unavailable, if it is — shown in About.
-    @Published private(set) var unavailableReason: String?
+    /// Shell command a Homebrew user runs instead of self-updating.
+    static let brewUpgradeCommand = "brew upgrade --cask \(Install.caskToken)"
 
     let channel = Install.channel
 
     private override init() {
         super.init()
 
-        switch channel {
-        case .homebrew:
-            unavailableReason = "Installed with Homebrew — update with "
-                + "`brew upgrade --cask agents-island` so the cask stays in sync."
-            return
-        case .unsigned:
-            unavailableReason = "This build has no update key, so it can't verify "
-                + "a download. Local builds update by rebuilding."
-            return
-        case .direct:
-            break
-        }
+        // Both non-direct channels are deliberate, not faults: a Homebrew
+        // install defers to brew so the cask cannot drift, and a keyless build
+        // refuses to trust a download it cannot verify. The UI wording should
+        // say which of those it is rather than implying something is broken.
+        guard channel == .direct else { return }
 
         let controller = SPUStandardUpdaterController(
             startingUpdater: true,
