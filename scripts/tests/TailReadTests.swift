@@ -90,6 +90,74 @@ struct TailReadTests {
             print("FAIL: decode dropped valid trailing bytes after invalid ones")
         }
 
+        // --- streaming a file in bounded chunks --------------------------------
+        // The usage tracker used to read whole transcripts into memory (and then
+        // copy them into a String), spiking RSS by ~250-300MB per 100MB file.
+        // The chunked reader must produce identical results, and its byte count
+        // must exclude a trailing partial line so the next pass re-reads it.
+        let dir = NSTemporaryDirectory() + "ai-tailread-\(getpid())"
+        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+
+        func consume(_ contents: String, chunk: Int, name: String) -> (lines: [String], consumed: UInt64) {
+            let path = dir + "/\(name)"
+            try? contents.write(toFile: path, atomically: true, encoding: .utf8)
+            guard let handle = FileHandle(forReadingAtPath: path) else { return ([], 0) }
+            defer { try? handle.close() }
+            var seen: [String] = []
+            let n = TailRead.consumeLines(handle: handle, chunkSize: chunk) { seen.append(String($0)) }
+            return (seen, n)
+        }
+
+        // Complete file, tiny chunks: lines must not be split at boundaries.
+        let complete = "alpha\nbeta\ngamma\n"
+        for chunkSize in [1, 2, 3, 5, 7, 16, 4096] {
+            let r = consume(complete, chunk: chunkSize, name: "c\(chunkSize).txt")
+            if r.lines != ["alpha", "beta", "gamma"] {
+                fail("chunk \(chunkSize): got \(r.lines)")
+            }
+            if r.consumed != UInt64(complete.utf8.count) {
+                fail("chunk \(chunkSize): consumed \(r.consumed), want \(complete.utf8.count)")
+            }
+        }
+
+        // Trailing partial line: not emitted, and NOT counted — otherwise the
+        // next pass would skip past a record that was still being written.
+        let partial = "alpha\nbeta\npartial-stil"
+        for chunkSize in [1, 4, 64] {
+            let r = consume(partial, chunk: chunkSize, name: "p\(chunkSize).txt")
+            if r.lines != ["alpha", "beta"] { fail("partial chunk \(chunkSize): got \(r.lines)") }
+            if r.consumed != UInt64("alpha\nbeta\n".utf8.count) {
+                fail("partial chunk \(chunkSize): consumed \(r.consumed), want 11")
+            }
+        }
+
+        // A multi-byte character straddling a chunk boundary must survive: the
+        // reader only ever cuts at newlines, so characters stay intact.
+        let unicode = "one ✅ two\n三 four\ncafé\n"
+        for chunkSize in [1, 2, 3, 5, 8, 13] {
+            let r = consume(unicode, chunk: chunkSize, name: "u\(chunkSize).txt")
+            if r.lines != ["one ✅ two", "三 four", "café"] {
+                fail("unicode chunk \(chunkSize): got \(r.lines)")
+            }
+        }
+
+        // A single line longer than the chunk size must still be assembled.
+        let long = String(repeating: "x", count: 10_000) + "\n"
+        let longResult = consume(long, chunk: 64, name: "long.txt")
+        if longResult.lines.count != 1 || longResult.lines.first?.count != 10_000 {
+            fail("a line longer than the chunk was not reassembled")
+        }
+
+        // Degenerate inputs.
+        if consume("", chunk: 16, name: "e.txt").consumed != 0 { fail("empty file consumed bytes") }
+        if !consume("no-newline-at-all", chunk: 4, name: "n.txt").lines.isEmpty {
+            fail("a file with no newline should emit nothing")
+        }
+        if consume("no-newline-at-all", chunk: 4, name: "n2.txt").consumed != 0 {
+            fail("a file with no complete line should consume nothing")
+        }
+
         if failures == 0 {
             print("✅ TailReadTests: all passed (byte-split windows no longer blank the card)")
         } else {

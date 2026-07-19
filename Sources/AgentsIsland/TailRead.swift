@@ -34,4 +34,49 @@ enum TailRead {
         if dropsFirstLine, !lines.isEmpty { lines.removeFirst() }
         return lines
     }
+
+    /// Stream complete lines from `handle`, starting at the current offset,
+    /// without holding the whole file in memory.
+    ///
+    /// The usage tracker previously read a transcript with `readToEnd()` and
+    /// then copied the result into a String. Its offset starts at zero for
+    /// every file it has not seen — first launch, and again whenever a file's
+    /// state is evicted — so a single 100MB transcript cost roughly 250-300MB
+    /// of peak RSS, and the tracker walks every transcript touched in the last
+    /// eight days in one pass. That is a lot for a menu bar app.
+    ///
+    /// A trailing partial line is deliberately left unconsumed: it is still
+    /// being written, and the returned byte count excludes it so the next pass
+    /// re-reads from the start of that line.
+    ///
+    /// - Returns: the number of bytes of complete lines consumed.
+    @discardableResult
+    static func consumeLines(
+        handle: FileHandle,
+        chunkSize: Int = 4 * 1024 * 1024,
+        _ body: (Substring) -> Void
+    ) -> UInt64 {
+        var carry = Data()          // bytes after the last newline seen so far
+        var totalRead: UInt64 = 0
+
+        while let chunk = try? handle.read(upToCount: chunkSize), !chunk.isEmpty {
+            totalRead += UInt64(chunk.count)
+            var buffer = carry
+            buffer.append(chunk)
+
+            guard let lastNewline = buffer.lastIndex(of: UInt8(ascii: "\n")) else {
+                carry = buffer      // still no complete line — keep accumulating
+                continue
+            }
+            // Whole lines only, so a multi-byte character can never be split
+            // across the boundary and decoding is exact.
+            for line in decode(buffer[...lastNewline])
+                .split(separator: "\n", omittingEmptySubsequences: true) {
+                body(line)
+            }
+            carry = Data(buffer[buffer.index(after: lastNewline)...])
+        }
+
+        return totalRead - UInt64(carry.count)
+    }
 }
