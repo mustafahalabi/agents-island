@@ -121,6 +121,10 @@ final class RemoteMonitor: ObservableObject {
     private let scanGate = NSLock()
     private var scanQueued = false
 
+    /// Previous cumulative-CPU observation per host and pid, used to derive
+    /// recent usage. Touched only from the serial scan queue.
+    private var cpuSamples: [String: [Int32: RemoteCPU.Sample]] = [:]
+
     func scanSoon() {
         scanGate.lock()
         if scanQueued { scanGate.unlock(); return }
@@ -192,7 +196,7 @@ final class RemoteMonitor: ObservableObject {
         // tell "connected but no agents" apart from "connected but ps failed"
         // (which would otherwise masquerade as a healthy empty host).
         let remoteCommand = """
-        ps axwwo pid=,ppid=,pcpu=,etime=,args= && echo __AI_SCAN_OK__; \
+        ps axwwo pid=,ppid=,pcpu=,time=,etime=,args= && echo __AI_SCAN_OK__; \
         for p in /proc/[0-9]*; do \
           c=$(readlink "$p/cwd" 2>/dev/null) || continue; \
           echo "CWD ${p#/proc/} $c"; \
@@ -213,7 +217,8 @@ final class RemoteMonitor: ObservableObject {
         guard let output, output.contains("__AI_SCAN_OK__") else { return nil }
 
         var cwds: [Int32: String] = [:]
-        var candidates: [(pid: Int32, ppid: Int32, cpu: Double, etime: String, args: String, kind: AgentKind)] = []
+        var candidates: [(pid: Int32, ppid: Int32, cpu: Double, cpuSeconds: Double?,
+                          etime: String, args: String, kind: AgentKind)] = []
         for line in output.split(separator: "\n") {
             if line.hasPrefix("CWD ") {
                 let parts = line.dropFirst(4).split(separator: " ", maxSplits: 1)
@@ -222,15 +227,18 @@ final class RemoteMonitor: ObservableObject {
                 }
                 continue
             }
+            // pid ppid pcpu time etime args — `time` is cumulative CPU, added so
+            // status can come from a delta rather than a lifetime average.
             let parts = line.trimmingCharacters(in: .whitespaces)
-                .split(separator: " ", maxSplits: 4, omittingEmptySubsequences: true)
-            guard parts.count == 5,
+                .split(separator: " ", maxSplits: 5, omittingEmptySubsequences: true)
+            guard parts.count == 6,
                   let pid = Int32(parts[0]),
                   let ppid = Int32(parts[1]),
                   let cpu = Double(parts[2]) else { continue }
-            let args = String(parts[4])
+            let cpuSeconds = RemoteCPU.parseCPUTime(String(parts[3]))
+            let args = String(parts[5])
             if let kind = AgentMonitor.detect(args: args), !disabled.contains(kind) {
-                candidates.append((pid, ppid, cpu, String(parts[3]), args, kind))
+                candidates.append((pid, ppid, cpu, cpuSeconds, String(parts[4]), args, kind))
             }
         }
 
@@ -257,6 +265,24 @@ final class RemoteMonitor: ObservableObject {
             }
         }
 
+        // Recent CPU from the change in cumulative CPU time since the previous
+        // scan. Only reachable from the serial scan queue, so no locking.
+        let now = Date()
+        var freshSamples: [Int32: RemoteCPU.Sample] = [:]
+        var recentPercent: [Int32: Double] = [:]
+        for row in rows {
+            guard let cpuSeconds = row.cpuSeconds else { continue }
+            let sample = RemoteCPU.Sample(cpuSeconds: cpuSeconds, at: now)
+            freshSamples[row.pid] = sample
+            if let percent = RemoteCPU.recentPercent(
+                previous: cpuSamples[host]?[row.pid], current: sample) {
+                recentPercent[row.pid] = percent
+            }
+        }
+        // Keyed per host and replaced wholesale, so entries for processes that
+        // have exited do not accumulate.
+        cpuSamples[host] = freshSamples
+
         return rows.map { row in
             let bypass = row.args.contains("bypassPermissions")
                 || row.args.contains("--dangerously-skip-permissions")
@@ -264,10 +290,11 @@ final class RemoteMonitor: ObservableObject {
             var session = AgentSession(
                 id: Self.syntheticId(host: host, pid: row.pid),
                 kind: row.kind,
-                cpu: row.cpu,
+                cpu: recentPercent[row.pid] ?? row.cpu,
                 elapsed: AgentMonitor.prettyElapsed(row.etime),
                 cwd: cwds[row.pid],
-                status: row.cpu > 3.0 ? .working : .idle,
+                status: RemoteCPU.isWorking(recent: recentPercent[row.pid],
+                                            lifetimeFallback: row.cpu) ? .working : .idle,
                 terminalApp: nil, // no local terminal to jump to
                 tty: nil,
                 bypassPermissions: bypass
