@@ -190,31 +190,26 @@ final class UsageTracker: ObservableObject {
         guard let handle = FileHandle(forReadingAtPath: path) else { return }
         defer { try? handle.close() }
         try? handle.seek(toOffset: state.offset)
-        guard let data = try? handle.readToEnd(), !data.isEmpty else { return }
 
-        // Only consume up to the last complete line; a partial tail line is
-        // still being written and will be re-read next pass.
-        var usable = data
-        if data.last != UInt8(ascii: "\n") {
-            if let lastNewline = data.lastIndex(of: UInt8(ascii: "\n")) {
-                usable = data.prefix(through: lastNewline)
-            } else {
-                return
-            }
-        }
-        state.offset += UInt64(usable.count)
-
-        guard let text = String(data: usable, encoding: .utf8) else { return }
-        for line in text.split(separator: "\n") {
+        // Streamed in bounded chunks rather than read whole. The offset starts
+        // at zero for every file this tracker has not seen, so reading to the
+        // end materialised an entire 100MB+ transcript and then copied it again
+        // into a String — roughly 250-300MB of peak RSS per file, across every
+        // transcript touched in the last eight days.
+        //
+        // consumeLines leaves a trailing partial line unconsumed and excludes
+        // it from the returned count, so the next pass re-reads from the start
+        // of that line — the same guarantee the previous code provided.
+        state.offset += TailRead.consumeLines(handle: handle) { line in
             // Cheap pre-filter before JSON parsing 100MB+ of history.
-            guard line.contains("\"usage\"") else { continue }
+            guard line.contains("\"usage\"") else { return }
             guard let obj = (try? JSONSerialization.jsonObject(with: Data(line.utf8))) as? [String: Any],
                   obj["type"] as? String == "assistant",
                   let message = obj["message"] as? [String: Any],
                   let usage = message["usage"] as? [String: Any],
                   let stamp = obj["timestamp"] as? String,
                   let date = Self.isoFractional.date(from: stamp) ?? Self.iso.date(from: stamp)
-            else { continue }
+            else { return }
 
             func tokens(_ key: String) -> Double {
                 (usage[key] as? NSNumber)?.doubleValue ?? 0
@@ -225,7 +220,7 @@ final class UsageTracker: ObservableObject {
                 + tokens("output_tokens")
                 + tokens("cache_creation_input_tokens")
                 + tokens("cache_read_input_tokens") * 0.1
-            guard weighted > 0 else { continue }
+            guard weighted > 0 else { return }
             let hour = Int(date.timeIntervalSince1970 / 3600)
             state.buckets[hour, default: 0] += weighted
         }

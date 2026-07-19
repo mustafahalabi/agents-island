@@ -16,7 +16,7 @@ enum GeminiSessions {
     private static let home = FileManager.default.homeDirectoryForCurrentUser.path
 
     private static var infoCache: [String: (mtime: Date, info: Info)] = [:]
-    private static var settingsModel: (loaded: Bool, model: String?) = (false, nil)
+    private static var settingsModel: (loaded: Bool, mtime: Date?, model: String?) = (false, nil, nil)
     private static let lock = NSLock()
 
     /// Gemini keys project data by the SHA-256 hex of the project root path.
@@ -37,6 +37,14 @@ enum GeminiSessions {
             lock.unlock()
             var info = cached.info
             info.promptAge = info.promptAge.map { _ in Date().timeIntervalSince(mtime) }
+            // chatPath is deliberately recomputed rather than served from the
+            // cache. The whole Info was keyed on logs.json's mtime, but Gemini
+            // writes logs.json when the user submits a prompt while chat and
+            // checkpoint files are written as the conversation is saved — so a
+            // newly saved conversation was invisible until the user typed
+            // again, and the detail view kept rendering the previous one. This
+            // is a directory listing, not a parse.
+            info.chatPath = newestChat(in: dir)
             return info
         }
         lock.unlock()
@@ -132,12 +140,20 @@ enum GeminiSessions {
     /// Default model from ~/.gemini/settings.json ("model" string or
     /// {"model": {"name": …}}), used when the process args carry no -m flag.
     static func defaultModel() -> String? {
+        let path = home + "/.gemini/settings.json"
+        // Re-read when the file changes. This used to load once and stick for
+        // the life of the process, so editing settings.json — or creating it
+        // after the app had already looked — showed a stale or absent model
+        // until the app was relaunched. A nil mtime (no file yet) is itself a
+        // cache key, so the file appearing later is picked up.
+        let mtime = (try? FileManager.default.attributesOfItem(atPath: path)[.modificationDate] as? Date) ?? nil
+
         lock.lock()
         defer { lock.unlock() }
-        if settingsModel.loaded { return settingsModel.model }
+        if settingsModel.loaded, settingsModel.mtime == mtime { return settingsModel.model }
 
         var model: String?
-        if let data = FileManager.default.contents(atPath: home + "/.gemini/settings.json"),
+        if let data = FileManager.default.contents(atPath: path),
            let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] {
             if let name = obj["model"] as? String {
                 model = name
@@ -145,7 +161,7 @@ enum GeminiSessions {
                 model = modelObj["name"] as? String
             }
         }
-        settingsModel = (true, model)
+        settingsModel = (true, mtime, model)
         return model
     }
 }
