@@ -28,10 +28,11 @@ struct IslandView: View {
     @AppStorage(Pref.maxPanelHeight) private var panelMaxHeight = 560.0
 
     private var spring: Animation { .spring(response: 0.42, dampingFraction: 0.78) }
-    // Opening: slow, fluid, gentle overshoot — the Apple feel.
-    private var expandSpring: Animation { .spring(response: 0.55, dampingFraction: 0.76) }
+    // Opening: quick off the mark with a trace of overshoot. Hover-triggered UI
+    // has to feel like it was already on its way — 0.55 read as hesitant.
+    private var expandSpring: Animation { .spring(response: 0.46, dampingFraction: 0.80) }
     // Closing: quicker and fully damped, no bounce on the way out.
-    private var collapseSpring: Animation { .spring(response: 0.38, dampingFraction: 0.92) }
+    private var collapseSpring: Animation { .spring(response: 0.32, dampingFraction: 0.95) }
     private var hidden: Bool { autoHideWhenEmpty && monitor.agents.isEmpty && !expanded }
     private var selectedAgent: AgentSession? {
         selectedPid.flatMap { pid in monitor.agents.first { $0.id == pid } }
@@ -63,6 +64,12 @@ struct IslandView: View {
                     .transition(.islandContent)
             }
         }
+        // Content is masked by the same silhouette that's stretching behind it,
+        // so it can start arriving immediately and get *revealed* by the growth
+        // instead of spilling outside a box that hasn't caught up. Clipping the
+        // content only — the background is applied after, so its outer shadow
+        // isn't cut off by the mask.
+        .clipShape(islandShape)
         .background(islandBackground)
         .geometryGroup()
         .opacity(hidden ? 0 : 1)
@@ -170,11 +177,14 @@ struct IslandView: View {
 
     // MARK: - Background
 
+    /// The silhouette, shared by the background fill and the content mask so the
+    /// two can never drift apart mid-morph.
+    private var islandShape: NotchShape {
+        NotchShape(topRadius: expanded ? 14 : 9, bottomRadius: expanded ? 30 : 12)
+    }
+
     private var islandBackground: some View {
-        let shape = NotchShape(
-            topRadius: expanded ? 14 : 9,
-            bottomRadius: expanded ? 30 : 12
-        )
+        let shape = islandShape
         return shape
             .fill(LinearGradient(
                 colors: [Color(white: 0.01), Color(white: expanded ? 0.055 : 0.03)],
@@ -259,6 +269,11 @@ struct IslandView: View {
         .padding(.bottom, 2)
     }
 
+    /// Slack the scroll view's clip bounds need so a hover-scaled card and its
+    /// shadow aren't shaved off at the edges. Cancelled out by an equal inset on
+    /// the content, so every visible margin stays exactly where it was.
+    private let cardLiftBleed: CGFloat = 6
+
     private var sessionList: some View {
         ScrollView(.vertical, showsIndicators: false) {
             VStack(spacing: 7) {
@@ -284,9 +299,19 @@ struct IslandView: View {
                 }
             }
             .background(HeightReader())
+            .padding(.horizontal, cardLiftBleed)
+            .padding(.vertical, cardLiftBleed)
         }
-        .onPreferenceChange(ContentHeightKey.self) { listContentHeight = $0 }
-        .frame(height: min(max(listContentHeight, 40), panelMaxHeight))
+        // The measured height lands a frame after the panel starts opening, so
+        // this must ride a spring too — assigning it bare snaps the panel from
+        // its guessed height to its real one mid-expand.
+        .onPreferenceChange(ContentHeightKey.self) { height in
+            withAnimation(expandSpring) { listContentHeight = height }
+        }
+        .frame(height: min(max(listContentHeight + cardLiftBleed * 2, 40),
+                           panelMaxHeight + cardLiftBleed * 2))
+        .padding(.horizontal, -cardLiftBleed)
+        .padding(.vertical, -cardLiftBleed)
     }
 
     @State private var listContentHeight: CGFloat = 200
@@ -564,6 +589,9 @@ private struct SessionCard: View {
                         }
                         .buttonStyle(.plain)
                         .help("Show conversation")
+                        // Grows out of the trailing edge rather than popping in.
+                        .transition(.scale(scale: 0.6, anchor: .trailing)
+                            .combined(with: .opacity))
                     }
                     Text(agent.elapsed)
                         .font(.system(size: fs - 1, weight: .medium, design: .rounded))
@@ -618,6 +646,11 @@ private struct SessionCard: View {
                     // Free-text question → answer inline without leaving.
                     replyBar
                         .padding(.top, 3)
+                        // Unfurls downward instead of snapping the card taller.
+                        .transition(.asymmetric(
+                            insertion: .opacity.combined(with: .offset(y: -6)),
+                            removal: .opacity
+                        ))
                 }
             }
         }
@@ -630,13 +663,20 @@ private struct SessionCard: View {
                     RoundedRectangle(cornerRadius: 15, style: .continuous)
                         .fill(statusWash)
                 )
+                .overlay(  // specular sheen along the top edge, only while hovered
+                    RoundedRectangle(cornerRadius: 15, style: .continuous)
+                        .fill(LinearGradient(
+                            colors: [.white.opacity(0.07), .clear],
+                            startPoint: .top, endPoint: .center))
+                        .opacity(hovered ? 1 : 0)
+                )
         )
-        .overlay(  // status-tinted left accent bar
+        .overlay(  // status-tinted left accent bar — elongates as you hover
             HStack(spacing: 0) {
                 RoundedRectangle(cornerRadius: 2)
                     .fill(effectiveStatus.color.opacity(effectiveStatus == .idle ? 0.3 : 0.9))
-                    .frame(width: 3)
-                    .padding(.vertical, 10)
+                    .frame(width: hovered || selected ? 3.5 : 3)
+                    .padding(.vertical, hovered || selected ? 6 : 10)
                 Spacer(minLength: 0)
             }
         )
@@ -644,11 +684,19 @@ private struct SessionCard: View {
             RoundedRectangle(cornerRadius: 15, style: .continuous)
                 .strokeBorder(borderColor, lineWidth: selected || approval != nil ? 1.5 : 1)
         )
-        .onHover { inside in
-            hovered = inside
-            if inside { NSCursor.pointingHand.push() } else { NSCursor.pop() }
-        }
+        // Lift: a scale small enough to stay crisp, plus a shadow that gives the
+        // card somewhere to lift *from*. Both ride the same spring as the chrome.
+        .shadow(color: .black.opacity(hovered ? 0.30 : 0),
+                radius: hovered ? 11 : 0, y: hovered ? 4 : 0)
+        .scaleEffect(hovered ? 1.012 : 1, anchor: .center)
+        .animation(hoverSpring, value: hovered)
+        .onHover { hovered = $0 }
+        .pointingHandCursor(hovered)
     }
+
+    /// Quick and fully damped — the highlight tracks the cursor without any
+    /// bounce, which is what makes it read as responsive rather than springy.
+    private var hoverSpring: Animation { .spring(response: 0.30, dampingFraction: 0.86) }
 
     /// "Needs approval: Bash" + Approve / Always / Deny, answering the
     /// terminal prompt (1 / 2 / 3) without leaving the island.
@@ -847,6 +895,33 @@ private struct SessionCard: View {
     }
 }
 
+/// Pointing-hand cursor tied to a hover flag. Tracks its own push so it always
+/// balances, including when the view disappears mid-hover — an agent card can
+/// vanish out from under the cursor, and a missed `pop()` strands the whole
+/// cursor stack on the pointing hand.
+private struct PointingHandCursor: ViewModifier {
+    let active: Bool
+    @State private var pushed = false
+
+    func body(content: Content) -> some View {
+        content
+            .onChange(of: active) { _, now in sync(to: now) }
+            .onDisappear { sync(to: false) }
+    }
+
+    private func sync(to want: Bool) {
+        guard want != pushed else { return }
+        pushed = want
+        if want { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+    }
+}
+
+private extension View {
+    func pointingHandCursor(_ active: Bool) -> some View {
+        modifier(PointingHandCursor(active: active))
+    }
+}
+
 private struct ApprovalButton: View {
     let label: String
     let tint: Color
@@ -861,11 +936,14 @@ private struct ApprovalButton: View {
                 .padding(.horizontal, 9)
                 .padding(.vertical, 4)
                 .background(Capsule().fill(tint.opacity(hovered ? 0.22 : 0.12)))
-                .overlay(Capsule().strokeBorder(tint.opacity(0.35), lineWidth: 1))
+                .overlay(Capsule().strokeBorder(tint.opacity(hovered ? 0.55 : 0.35), lineWidth: 1))
                 .contentShape(Capsule())
+                .scaleEffect(hovered ? 1.04 : 1)
         }
         .buttonStyle(.plain)
+        .animation(.spring(response: 0.26, dampingFraction: 0.82), value: hovered)
         .onHover { hovered = $0 }
+        .pointingHandCursor(hovered)
     }
 }
 

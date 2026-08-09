@@ -67,19 +67,24 @@ extension AnyTransition {
     /// first — the shape expands, then content materializes into it.
     static var islandContentIn: AnyTransition {
         .modifier(
-            active: BlurFadeModifier(blur: 8, opacity: 0, scale: 0.97),
+            active: BlurFadeModifier(blur: 2.5, opacity: 0, scale: 0.97),
             identity: BlurFadeModifier(blur: 0, opacity: 1, scale: 1)
         )
-        .animation(.easeOut(duration: 0.26).delay(0.12))
+        // No delay: the silhouette masks the content, so it rides *with* the
+        // stretch. Waiting for the box left ~60ms where the island was an empty
+        // black slab — the single worst frame-by-frame flaw in the open.
+        // Blur stays light; at 5 it read as a smear rather than a focus pull.
+        .animation(.spring(response: 0.34, dampingFraction: 0.88))
     }
 
-    /// Departing content vanishes quickly so the shape can shrink cleanly.
+    /// Departing content vanishes quickly so the shape can shrink cleanly —
+    /// but must still overlap the arriving content, never hand off to a gap.
     static var islandContentOut: AnyTransition {
         .modifier(
-            active: BlurFadeModifier(blur: 5, opacity: 0, scale: 0.98),
+            active: BlurFadeModifier(blur: 2, opacity: 0, scale: 0.985),
             identity: BlurFadeModifier(blur: 0, opacity: 1, scale: 1)
         )
-        .animation(.easeIn(duration: 0.13))
+        .animation(.easeOut(duration: 0.09))
     }
 
     static var islandContent: AnyTransition {
@@ -99,9 +104,11 @@ private struct StaggeredEntrance: ViewModifier {
             .blur(radius: shown ? 0 : 4)
             .onAppear {
                 // Content transition already waits for the container stretch;
-                // cards then settle in short sequence.
-                withAnimation(.spring(response: 0.45, dampingFraction: 0.82)
-                    .delay(0.04 + Double(index) * 0.05)) {
+                // cards then settle in short sequence. Kept tight — a long
+                // per-card delay leaves the last card arriving after the shape
+                // has stopped moving, which reads as lag rather than cascade.
+                withAnimation(.spring(response: 0.40, dampingFraction: 0.86)
+                    .delay(0.03 + Double(index) * 0.035)) {
                     shown = true
                 }
             }
