@@ -18,7 +18,7 @@ A notch-hugging panel shows every AI agent running on the Mac — Claude Code, C
 - Works on Macs without a notch (floating pill, auto-repositions on display changes).
 - Panel is a borderless, non-activating `NSPanel` at `.screenSaver` level, visible on all Spaces and over fullscreen apps.
 
-### Session cards (Claude Code, **Codex**, and **Gemini** sessions get the rich treatment)
+### Session cards (Claude Code, **Codex**, **Gemini**, and **Grok** sessions get the rich treatment)
 - **Brand icon** of the agent (real logos, MIT-licensed lobehub icon set) with a status-dot badge.
 - **AI-generated session title** (falls back to project folder name).
 - **"You: …"** — your last prompt.
@@ -30,7 +30,7 @@ A notch-hugging panel shows every AI agent running on the Mac — Claude Code, C
 - Cards sort working → waiting → idle; idle cards are visually dimmed.
 
 ### Statuses
-- 🟢 **Working** — Claude: session registry says `busy`. Codex: rollout has `task_started` without a closing `task_complete`, or an unresolved function call. Gemini: CPU >3% or a prompt in the last 20s.
+- 🟢 **Working** — Claude: session registry says `busy`. Codex: rollout has `task_started` without a closing `task_complete`, or an unresolved function call. Gemini: CPU >3% or a prompt in the last 20s. Grok: events.jsonl has `turn_started` without a closing `turn_ended`.
 - 🟠 **Waiting for you** — turn finished, no reply yet.
 - ⚪️ **Idle** — no activity for 30+ minutes.
 - Other agents fall back to a CPU heuristic (>3% = working, never "waiting").
@@ -68,6 +68,7 @@ The key discovery: **Claude Code publishes everything needed, locally**.
 | `~/.claude/tasks/<sessionId>/<n>.json` | **Current task system**: one JSON per task (`subject`, `status`) — the transcript's `TodoWrite` is only the legacy fallback |
 | `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` | **Codex rollouts**: `session_meta` (cwd, git), `turn_context` (model), `response_item` (messages, function calls → activity, `update_plan` → task checklist), `event_msg` (`task_started`/`task_complete` → status, `user_message` → prompt). pid→rollout mapped via lsof of the open file, falling back to cwd match; handles both wrapped (`type`/`payload`) and older flat record shapes. Env-context/instruction injections filtered from prompts. |
 | `~/.gemini/tmp/<sha256-of-cwd>/` | **Gemini per-project data**: `logs.json` → last user prompt + prompt age (drives waiting/idle split and a 20s post-prompt "working" grace on top of the CPU heuristic — Gemini writes no task events); newest `checkpoint*.json` / `chats/*.json` → detail-view conversation (Content shape `{role, parts[].text}`, plus `history`/`messages` wrappers); model from `-m/--model` process args, falling back to settings.json. |
+| `~/.grok/sessions/<percent-encoded-cwd>/<sessionId>/` | **Grok session store**: pid → session via `~/.grok/active_sessions.json`; `events.jsonl` (`turn_started`/`turn_ended` → status, `tool_started`/`phase_changed` → activity, `permission_requested` unresolved → waiting-for-you; MCP transport noise excluded from turn evidence) ; `summary.json` → AI title + model; `chat_history.jsonl` → last prompt (unwrapped from `<user_query>`), `todo_write` → task checklist, detail-view conversation. Remote hosts ship the registry + 32KB event tails inside the existing SSH scan, so remote Grok gets real status too. |
 | `ps -axwwo pid,ppid,pcpu,tty,etime,args` | Agent discovery (by executable basename, incl. node/bun/python wrappers), CPU, tty, uptime, BYPASS flag detection |
 | `lsof -a -d cwd -p …` | Working directory for non-Claude agents |
 | ppid ancestry walk | Hosting terminal app (first `.app` ancestor, or tmux/screen/zellij) |
