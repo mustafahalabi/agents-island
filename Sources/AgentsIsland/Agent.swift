@@ -42,7 +42,7 @@ enum AgentKind: String, CaseIterable {
         .qwen:        Meta(displayName: "Qwen",     rgb: (0.38, 0.36, 0.93), symbol: "diamond.fill",    iconFile: "qwen",     aliases: ["qwen-code"]),
         .kimi:        Meta(displayName: "Kimi",     rgb: (0.12, 0.12, 0.15), symbol: "moon.stars.fill", iconFile: "kimi",     aliases: ["kimi-code"]),
         .deepseek:    Meta(displayName: "DeepSeek", rgb: (0.30, 0.42, 1.00), symbol: "magnifyingglass", iconFile: "deepseek", aliases: ["deepcode"]),
-        .grok:        Meta(displayName: "Grok",     rgb: (0.12, 0.12, 0.14), symbol: "x.circle.fill",   iconFile: "grok",     aliases: ["grok-cli"]),
+        .grok:        Meta(displayName: "Grok",     rgb: (0.12, 0.12, 0.14), symbol: "circle.slash",    iconFile: "grok",     aliases: ["grok-cli"]),
         .mistral:     Meta(displayName: "Mistral",  rgb: (0.98, 0.32, 0.06), symbol: "wind",            iconFile: "mistral",  aliases: ["vibe", "mistral-vibe"]),
     ]
 

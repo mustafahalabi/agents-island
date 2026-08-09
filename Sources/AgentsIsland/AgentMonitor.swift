@@ -15,7 +15,7 @@ final class AgentMonitor: ObservableObject {
     private var pendingCompletion: Set<Int32> = []
     /// Kinds whose status comes from a transcript/registry (real working/waiting),
     /// so they reach `.waiting` and don't need the CPU-idle completion heuristic.
-    private static let richStatusKinds: Set<AgentKind> = [.claude, .codex, .gemini]
+    private static let richStatusKinds: Set<AgentKind> = [.claude, .codex, .gemini, .grok]
     private let queue = DispatchQueue(label: "agents-island.scan", qos: .utility)
 
     func start() {
@@ -60,14 +60,16 @@ final class AgentMonitor: ObservableObject {
                 // already running would otherwise "start" at once.
                 if !firstScan {
                     for session in found {
-                        // Remote sessions are judged purely by CPU regardless of
-                        // kind: RemoteMonitor only ever reports .working or
-                        // .idle, so a remote Claude/Codex/Gemini can never reach
+                        // Remote sessions are judged purely by CPU regardless
+                        // of kind (except Grok, whose turn events ship over
+                        // SSH): a remote Claude/Codex/Gemini can never reach
                         // .waiting and the (.working, .waiting) completion case
                         // below never fires for one. Gating on kind alone meant
                         // those agents played the acknowledge sound when they
-                        // started but never the task-complete sound, while
-                        // remote Qwen/Grok did.
+                        // started but never the task-complete sound. Treating
+                        // them cpuOnly keeps the idle-debounce as a fallback,
+                        // which is also right for remote Grok when its event
+                        // tail is unavailable.
                         let cpuOnly = !Self.richStatusKinds.contains(session.kind)
                             || session.remoteHost != nil
                         switch (previous[session.id], session.status) {
@@ -224,6 +226,34 @@ final class AgentMonitor: ObservableObject {
                 case .unknown:
                     // No task events parsed — trust the CPU heuristic, but
                     // still demote/hide long-quiet sessions by rollout age.
+                    if session.status != .working {
+                        session.status = idleAge > 30 * 60 ? .idle : .waiting
+                        if hideIdleMinutes > 0, idleAge > Double(hideIdleMinutes) * 60 { continue }
+                    }
+                }
+            } else if row.kind == .grok,
+                      let dir = GrokSessions.sessionDir(pid: row.pid, cwd: cwds[row.pid]) {
+                let info = GrokSessions.info(dir: dir)
+                session.transcriptPath = dir + "/chat_history.jsonl"
+                session.title = info.title
+                session.lastPrompt = info.lastPrompt
+                session.lastMessage = info.lastMessage
+                session.model = info.model
+                session.todos = info.todos
+
+                let eventsPath = dir + "/events.jsonl"
+                let mtime = (try? FileManager.default.attributesOfItem(atPath: eventsPath)[.modificationDate] as? Date) ?? nil
+                let idleAge = mtime.map { Date().timeIntervalSince($0) } ?? 0
+                switch info.phase {
+                case .working:
+                    session.status = .working
+                    session.activity = info.activity ?? "Thinking…"
+                case .waiting:
+                    session.status = idleAge > 30 * 60 ? .idle : .waiting
+                    if hideIdleMinutes > 0, idleAge > Double(hideIdleMinutes) * 60 { continue }
+                case .unknown:
+                    // No turn events parsed — trust the CPU heuristic, but
+                    // still demote/hide long-quiet sessions by event age.
                     if session.status != .working {
                         session.status = idleAge > 30 * 60 ? .idle : .waiting
                         if hideIdleMinutes > 0, idleAge > Double(hideIdleMinutes) * 60 { continue }

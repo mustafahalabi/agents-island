@@ -1089,6 +1089,7 @@ private struct SessionDetail: View {
             switch kind {
             case .codex: loaded = CodexSessions.recentMessages(path: path)
             case .gemini: loaded = GeminiSessions.recentMessages(path: path)
+            case .grok: loaded = GrokSessions.recentMessages(path: path)
             default: loaded = ClaudeSessions.recentMessages(path: path)
             }
             DispatchQueue.main.async {

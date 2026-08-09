@@ -76,6 +76,12 @@ run "RemoteCPUTests" "$TMP/remotecpu" \
     Sources/AgentsIsland/RemoteCPU.swift \
     scripts/tests/RemoteCPUTests.swift
 
+run "GrokPhaseTests" "$TMP/grokphase" \
+    Sources/AgentsIsland/Agent.swift \
+    Sources/AgentsIsland/TailRead.swift \
+    Sources/AgentsIsland/GrokSessions.swift \
+    scripts/tests/GrokPhaseTests.swift
+
 run "CodexPhaseTests" "$TMP/codexphase" \
     Sources/AgentsIsland/Agent.swift \
     Sources/AgentsIsland/TailRead.swift \

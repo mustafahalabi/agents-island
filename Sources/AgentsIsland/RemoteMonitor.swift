@@ -195,12 +195,24 @@ final class RemoteMonitor: ObservableObject {
         // The trailing sentinel only prints if `ps` itself succeeded, so we can
         // tell "connected but no agents" apart from "connected but ps failed"
         // (which would otherwise masquerade as a healthy empty host).
+        // The grok block ships the pid → session registry and a tail of each
+        // recently-active session's event stream in the same round trip, so
+        // remote Grok status can come from real turn events instead of the CPU
+        // heuristic (which flaps working ↔ idle on every server-side thinking
+        // step and fires a notification per flap).
         let remoteCommand = """
         ps axwwo pid=,ppid=,pcpu=,time=,etime=,args= && echo __AI_SCAN_OK__; \
         for p in /proc/[0-9]*; do \
           c=$(readlink "$p/cwd" 2>/dev/null) || continue; \
           echo "CWD ${p#/proc/} $c"; \
-        done 2>/dev/null
+        done 2>/dev/null; \
+        if [ -f "$HOME/.grok/active_sessions.json" ]; then \
+          echo __AI_GROK_REG__; cat "$HOME/.grok/active_sessions.json"; echo; echo __AI_GROK_REG_END__; \
+          find "$HOME/.grok/sessions" -name events.jsonl -mmin -120 2>/dev/null | head -20 | \
+          while read -r f; do \
+            echo "__AI_GROK_EV__ $f"; tail -c 32768 "$f"; echo; echo __AI_GROK_EV_END__; \
+          done; \
+        fi
         """
         let output = run("/usr/bin/ssh", [
             "-o", "BatchMode=yes",
@@ -219,7 +231,29 @@ final class RemoteMonitor: ObservableObject {
         var cwds: [Int32: String] = [:]
         var candidates: [(pid: Int32, ppid: Int32, cpu: Double, cpuSeconds: Double?,
                           etime: String, args: String, kind: AgentKind)] = []
+        // Grok store sections, captured out of the ps stream by marker lines.
+        enum Section { case ps, grokRegistry, grokTail(String) }
+        var section = Section.ps
+        var grokRegistryText = ""
+        var grokTails: [String: String] = [:]   // events.jsonl path → tail text
+
         for line in output.split(separator: "\n") {
+            if line == "__AI_GROK_REG__" { section = .grokRegistry; continue }
+            if line == "__AI_GROK_REG_END__" || line == "__AI_GROK_EV_END__" { section = .ps; continue }
+            if line.hasPrefix("__AI_GROK_EV__ ") {
+                section = .grokTail(String(line.dropFirst("__AI_GROK_EV__ ".count)))
+                continue
+            }
+            switch section {
+            case .grokRegistry:
+                grokRegistryText += line + "\n"
+                continue
+            case .grokTail(let path):
+                grokTails[path, default: ""] += line + "\n"
+                continue
+            case .ps:
+                break
+            }
             if line.hasPrefix("CWD ") {
                 let parts = line.dropFirst(4).split(separator: " ", maxSplits: 1)
                 if parts.count == 2, let pid = Int32(parts[0]) {
@@ -239,6 +273,20 @@ final class RemoteMonitor: ObservableObject {
             let args = String(parts[5])
             if let kind = AgentMonitor.detect(args: args), !disabled.contains(kind) {
                 candidates.append((pid, ppid, cpu, cpuSeconds, String(parts[4]), args, kind))
+            }
+        }
+
+        // Remote pid → events tail, via the registry. Sessions are keyed by
+        // id, and each tail's path contains "/<session-id>/".
+        var grokEventsByPid: [Int32: String] = [:]
+        if !grokRegistryText.isEmpty,
+           let list = (try? JSONSerialization.jsonObject(with: Data(grokRegistryText.utf8))) as? [[String: Any]] {
+            for obj in list {
+                guard let pid = obj["pid"] as? Int32 ?? (obj["pid"] as? Int).map(Int32.init),
+                      let sessionId = obj["session_id"] as? String else { continue }
+                if let tail = grokTails.first(where: { $0.key.contains("/\(sessionId)/") })?.value {
+                    grokEventsByPid[pid] = tail
+                }
             }
         }
 
@@ -301,6 +349,20 @@ final class RemoteMonitor: ObservableObject {
             )
             session.remoteHost = host
             session.model = AgentMonitor.argsModel(row.args)
+            // Remote Grok gets real turn-event status — the only remote kind
+            // that can reach .waiting instead of flapping on CPU.
+            if row.kind == .grok, let tail = grokEventsByPid[row.pid] {
+                let state = GrokSessions.eventState(fromTailText: tail)
+                switch state.phase {
+                case .working:
+                    session.status = .working
+                    session.activity = state.streaming ?? "Thinking…"
+                case .waiting:
+                    session.status = .waiting
+                case .unknown:
+                    break // keep the CPU heuristic
+                }
+            }
             return session
         }
     }
