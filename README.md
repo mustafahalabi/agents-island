@@ -21,10 +21,10 @@ Native SwiftUI. No Electron, no dock icon, no cloud — everything is read from 
 - Hover to expand: a session card per agent with Apple-grade morphing animation (container-first stretch, staggered card entrances).
 - Visible on all Spaces and over fullscreen apps; optionally hides on fullscreen spaces.
 
-**📇 Rich session cards** *(Claude Code, Codex, and Gemini)*
+**📇 Rich session cards** *(Claude Code, Codex, Gemini, and Grok)*
 - AI-generated session title, your last prompt, and a **live activity line** — "Writing IslandView.swift", "Running npm test" — derived from the agent's own transcript.
-- Real **working / waiting-for-you / idle** status (not just CPU): Claude's session registry, Codex's task events, Gemini's prompt log.
-- **Task checklists** live from Claude's task store and Codex's `update_plan`.
+- Real **working / waiting-for-you / idle** status (not just CPU): Claude's session registry, Codex's task events, Gemini's prompt log, Grok's turn events.
+- **Task checklists** live from Claude's task store, Codex's `update_plan`, and Grok's `todo_write`.
 - Running **subagents** with pulsing indicators; **plan previews** rendered from ExitPlanMode with Markdown.
 - Chips for agent brand, **AI model** (Opus 4.8, GPT 5 Codex…), **git branch** (worktree-aware), terminal app, and a red **BYPASS** badge when permissions are skipped.
 
@@ -117,8 +117,9 @@ Everything is local. The key insight is that coding agents already publish their
 | `~/.claude/tasks/` | task checklists |
 | `~/.codex/sessions/**/rollout-*.jsonl` | Codex status (task events), activity, plans, model |
 | `~/.gemini/tmp/<hash>/` | Gemini prompts and saved chats |
+| `~/.grok/sessions/**/` | Grok status (turn events), activity, todos, title, model, chats |
 | `ps` / `lsof` | agent discovery, CPU, tty, working directory, hosting terminal |
-| `ssh host 'ps …'` | remote sessions |
+| `ssh host 'ps …'` | remote sessions (plus Grok turn-event tails for real remote status) |
 
 Transcript parsing reads only the file tails (agent transcripts grow to 100MB+) and caches by mtime; the usage tracker backfills once and then reads only appended bytes. Polling is every 2s (configurable) on a utility queue, and the UI only updates when something actually changed.
 
