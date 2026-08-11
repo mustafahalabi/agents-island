@@ -19,6 +19,18 @@ VERSION="${1:?usage: ./scripts/release.sh <version>}"
 TAG="v$VERSION"
 NOTARY_PROFILE="${NOTARY_PROFILE:-agents-island}"
 
+# Where the notary profile lives. Locally that is the login Keychain and the
+# flag is unnecessary; CI has no login Keychain, so the release workflow builds
+# a throwaway one and points NOTARY_KEYCHAIN at it. Everything below goes
+# through NOTARY_AUTH rather than naming --keychain-profile itself, so the two
+# environments cannot drift apart.
+NOTARY_AUTH=(--keychain-profile "$NOTARY_PROFILE")
+[ -n "${NOTARY_KEYCHAIN:-}" ] && NOTARY_AUTH+=(--keychain "$NOTARY_KEYCHAIN")
+
+# The Homebrew tap push. CI overrides this with a token-bearing URL, since a
+# runner has no git credential helper to fall back on.
+TAP_REMOTE="${TAP_REMOTE:-https://github.com/mustafahalabi/homebrew-tap.git}"
+
 # Gatekeeper gate. A Developer ID signature is NOT enough — without a stapled
 # ticket macOS quarantines the app on first launch and users watch it vanish
 # from /Applications. Releases 0.3.0–0.4.5 shipped exactly that way, so nothing
@@ -51,7 +63,7 @@ verify_notarized() {
 SIGN_ID=$(security find-identity -v -p codesigning 2>/dev/null \
     | grep -o '"Developer ID Application: [^"]*"' | head -1 | tr -d '"') || true
 HAVE_NOTARY=0
-xcrun notarytool history --keychain-profile "$NOTARY_PROFILE" >/dev/null 2>&1 && HAVE_NOTARY=1
+xcrun notarytool history "${NOTARY_AUTH[@]}" >/dev/null 2>&1 && HAVE_NOTARY=1
 
 if [ -z "$SIGN_ID" ] || [ "$HAVE_NOTARY" != 1 ]; then
     if [ "${ALLOW_UNSIGNED:-0}" != 1 ]; then
@@ -74,7 +86,7 @@ TAPTMP=$(mktemp -d)
 trap '[ "$KEEP_TAP" = 1 ] || rm -rf "$TAPTMP"' EXIT
 if [ -n "$SIGN_ID" ]; then
     echo "==> Checking Homebrew tap push access"
-    git clone --quiet --depth 1 "https://github.com/mustafahalabi/homebrew-tap.git" "$TAPTMP/tap"
+    git clone --quiet --depth 1 "$TAP_REMOTE" "$TAPTMP/tap"
     if ! git -C "$TAPTMP/tap" push --dry-run -q 2>/dev/null; then
         echo "FATAL: no push access to mustafahalabi/homebrew-tap." >&2
         echo "       Fix credentials first — otherwise the release ships and the" >&2
@@ -112,7 +124,7 @@ if [ -n "$SIGN_ID" ]; then
     # when the verdict is Invalid — so the status has to be read back, not
     # inferred from the exit code.
     SUBMIT_OUT=$(xcrun notarytool submit /tmp/AgentsIsland-notarize.zip \
-        --keychain-profile "$NOTARY_PROFILE" --wait 2>&1) || true
+        "${NOTARY_AUTH[@]}" --wait 2>&1) || true
     echo "$SUBMIT_OUT"
     # Match only the final summary's "  status: X" — the progress lines read
     # "Current status: In Progress", where $2 is "status:" rather than a verdict.
@@ -120,7 +132,7 @@ if [ -n "$SIGN_ID" ]; then
     if [ "$STATUS" != "Accepted" ]; then
         echo "FATAL: notarization did not succeed (status: ${STATUS:-unknown})." >&2
         SUB_ID=$(echo "$SUBMIT_OUT" | awk '/^ *id:/ {print $2; exit}')
-        [ -n "$SUB_ID" ] && echo "       xcrun notarytool log $SUB_ID --keychain-profile $NOTARY_PROFILE" >&2
+        [ -n "$SUB_ID" ] && echo "       xcrun notarytool log $SUB_ID ${NOTARY_AUTH[*]}" >&2
         exit 1
     fi
     xcrun stapler staple dist/AgentsIsland.app
@@ -150,7 +162,7 @@ fi
 # (make-dmg reuses the stapled app, then signs + notarizes + staples the DMG).
 DMG="AgentsIsland-${VERSION}.dmg"
 VERSION="$VERSION" SIGN_ID="$SIGN_ID" NOTARY_PROFILE="$NOTARY_PROFILE" \
-    ./scripts/make-dmg.sh --no-build
+    NOTARY_KEYCHAIN="${NOTARY_KEYCHAIN:-}" ./scripts/make-dmg.sh --no-build
 shasum -a 256 "$DMG" > "$DMG.sha256"
 if [ -n "$SIGN_ID" ]; then verify_notarized "$DMG" "$DMG"; fi
 
@@ -201,7 +213,12 @@ if [ -n "$SIGN_ID" ]; then
     # asset is plain AgentsIsland.zip, so Sparkle found the update and then
     # failed to download it.
     cp AgentsIsland.zip "$CASTDIR/AgentsIsland.zip"
-    "$SPARKLE_BIN/generate_appcast" \
+    # Without the flag generate_appcast reads the private EdDSA key from the
+    # Keychain, which is right locally and impossible in CI — there the workflow
+    # writes the secret to a file and points SPARKLE_ED_KEY_FILE at it.
+    ED_KEY_ARGS=()
+    [ -n "${SPARKLE_ED_KEY_FILE:-}" ] && ED_KEY_ARGS=(--ed-key-file "$SPARKLE_ED_KEY_FILE")
+    "$SPARKLE_BIN/generate_appcast" "${ED_KEY_ARGS[@]+"${ED_KEY_ARGS[@]}"}" \
         --download-url-prefix "https://github.com/mustafahalabi/agents-island/releases/download/$TAG/" \
         --link "https://github.com/mustafahalabi/agents-island" \
         --maximum-versions 10 \

@@ -107,6 +107,60 @@ that write nothing readable are not, however popular they are.
 
 ## Release process
 
-Releases are cut locally by a maintainer with `scripts/release.sh` — signing
-and notarization need a Developer ID certificate that can't live in CI. You don't
-need to touch versioning in your PR.
+Merging to `main` cuts the release. You don't set a version number in your PR —
+`.github/workflows/release.yml` works it out from the commit subjects, so the
+only thing you need to get right is the conventional-commit prefix:
+
+| Commit subject | Result |
+| --- | --- |
+| `fix: …`, `perf: …` | patch release (0.7.1 → 0.7.2) |
+| `feat: …` | minor release (0.7.1 → 0.8.0) |
+| `feat!: …`, or `BREAKING CHANGE:` in the body | major release (0.7.1 → 1.0.0) |
+| `docs: …`, `chore: …`, `test: …`, `refactor: …`, `ci: …` | no release |
+
+The highest bump in the merge wins, so a PR with one `feat:` and three `fix:`
+commits ships a single minor release. Scopes are fine — `fix(detect): …` counts
+as a `fix`. A subject that matches nothing above ships nothing, which is the
+safe direction to fail: a missed release is one `workflow_dispatch` away, and a
+published one can't be recalled.
+
+`scripts/next-version.sh` is the whole decision, and
+`scripts/tests/next-version-tests.sh` covers it. To see what the current `main`
+would ship without shipping it:
+
+```sh
+./scripts/next-version.sh          # prints the version, or nothing
+```
+
+### Cutting one by hand
+
+The workflow calls `scripts/release.sh`, and that still works locally when a
+maintainer needs to release out of band — it signs, notarizes, staples,
+publishes, and bumps the Homebrew cask exactly the same way:
+
+```sh
+./scripts/release.sh 0.8.0
+```
+
+There is also a **Run workflow** button on the Release action that takes an
+optional version, for re-running a release the commit subjects didn't trigger.
+
+### Maintainer setup: the secrets
+
+Only a maintainer needs these, and only once. A fork has none of them, which is
+why releases never run on `pull_request`.
+
+| Secret | What it is |
+| --- | --- |
+| `MACOS_CERT_P12` | Developer ID Application certificate + private key, exported as `.p12` and base64-encoded |
+| `MACOS_CERT_PASSWORD` | The password set when exporting that `.p12` |
+| `APPLE_ID` | Apple ID for notarization |
+| `APPLE_TEAM_ID` | Developer Team ID |
+| `APPLE_APP_PASSWORD` | App-specific password from account.apple.com |
+| `SPARKLE_PRIVATE_KEY` | The private EdDSA key that signs the appcast |
+| `TAP_DEPLOY_KEY` | Private half of a write-enabled deploy key on `mustafahalabi/homebrew-tap` |
+
+`scripts/export-release-secrets.sh` prints each value from the local Keychain,
+ready to paste. The Sparkle private key in particular is not recoverable if
+lost — every existing install would stop receiving updates — so it is worth
+having it in a password manager as well as in GitHub.

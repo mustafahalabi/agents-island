@@ -29,13 +29,13 @@ DMG="AgentsIsland-${VERSION}.dmg"
 notarize_or_die() {
     local submit="$1" staple="${2:-$1}" out status sub_id
     out=$(xcrun notarytool submit "$submit" \
-        --keychain-profile "$NOTARY_PROFILE" --wait 2>&1) || true
+        "${NOTARY_AUTH[@]}" --wait 2>&1) || true
     echo "$out"
     status=$(echo "$out" | awk '$1=="status:" {s=$2} END {print s}')
     if [ "$status" != "Accepted" ]; then
         echo "FATAL: notarization of $submit failed (status: ${status:-unknown})." >&2
         sub_id=$(echo "$out" | awk '/^ *id:/ {print $2; exit}')
-        [ -n "$sub_id" ] && echo "       xcrun notarytool log $sub_id --keychain-profile $NOTARY_PROFILE" >&2
+        [ -n "$sub_id" ] && echo "       xcrun notarytool log $sub_id ${NOTARY_AUTH[*]}" >&2
         exit 1
     fi
     xcrun stapler staple "$staple"
@@ -54,8 +54,12 @@ fi
 #      app and moves it to the Trash, so that combination now aborts unless
 #      ALLOW_UNNOTARIZED=1 marks the build as deliberately local-only.
 NOTARY_PROFILE="${NOTARY_PROFILE:-agents-island}"
+# NOTARY_KEYCHAIN points at the throwaway keychain the release workflow builds;
+# locally it is unset and the profile is found in the login Keychain.
+NOTARY_AUTH=(--keychain-profile "$NOTARY_PROFILE")
+[ -n "${NOTARY_KEYCHAIN:-}" ] && NOTARY_AUTH+=(--keychain "$NOTARY_KEYCHAIN")
 HAVE_NOTARY=0
-if [ -n "${SIGN_ID:-}" ] && xcrun notarytool history --keychain-profile "$NOTARY_PROFILE" >/dev/null 2>&1; then
+if [ -n "${SIGN_ID:-}" ] && xcrun notarytool history "${NOTARY_AUTH[@]}" >/dev/null 2>&1; then
     HAVE_NOTARY=1
 fi
 

@@ -1,8 +1,9 @@
 name: CI
 
-# Releases are cut locally with scripts/release.sh (signing + notarization
-# need the Developer ID certificate, which lives in the maintainer's
-# keychain). CI just proves every push builds and the logic tests pass.
+# This workflow only proves that a push builds and the logic tests pass.
+# Releasing is release.yml's job: it runs on merges to main, works out the
+# version from the conventional-commit subjects, and signs with secrets a fork
+# never sees. scripts/release.sh still cuts a release by hand when needed.
 on:
   push:
     branches: [main]
