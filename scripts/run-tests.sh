@@ -95,6 +95,11 @@ run "SubprocessTests" "$TMP/subproc" \
     Sources/AgentsIsland/Subprocess.swift \
     scripts/tests/SubprocessTests.swift
 
+# Not Swift, so it runs itself rather than going through run(). It guards the
+# version arithmetic that .github/workflows/release.yml acts on unattended.
+echo "==> NextVersionTests"
+bash scripts/tests/next-version-tests.sh || fail=1
+
 if [ "$fail" = 0 ]; then
     echo "✅ all test suites passed"
 else
