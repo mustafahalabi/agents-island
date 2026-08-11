@@ -1,6 +1,7 @@
 #!/bin/bash
 # Cut a signed, notarized release and bump the Homebrew cask.
 #   ./scripts/release.sh 0.2.0
+#   DRY_RUN=1 ./scripts/release.sh 0.2.0   build, sign, notarize — publish nothing
 #
 # One-time setup (needs your Apple Developer account):
 #   1. Developer ID certificate — Xcode → Settings → Accounts → your team →
@@ -230,6 +231,25 @@ if [ -n "$SIGN_ID" ]; then
         echo "FATAL: appcast has no EdDSA signature — is the private key in the Keychain?" >&2
         exit 1; }
     echo "    ✓ appcast signed"
+fi
+
+# ---- Dry run stops here -----------------------------------------------------
+# Everything above this line is verification: the build is universal, the app
+# and DMG are notarized and stapled, the zip survived packaging, the appcast is
+# signed, and the tap is writable. Everything below is publication, and none of
+# it can be taken back. DRY_RUN=1 exercises the first half and stops — which is
+# how you find out a credential is wrong without a half-published release.
+if [ "${DRY_RUN:-0}" = 1 ]; then
+    echo
+    echo "==> DRY RUN — nothing published. Would have:"
+    echo "      tagged        $TAG"
+    echo "      released      $DMG, AgentsIsland.zip${APPCAST:+, appcast.xml}"
+    echo "      bumped cask   $VERSION ($SHA)"
+    echo "==> Verified: universal build, notarized + stapled app and DMG,"
+    echo "    packaged zip, ${APPCAST:+signed appcast, }tap write access."
+    rm -f AgentsIsland.zip AgentsIsland.zip.sha256 "$DMG" "$DMG.sha256"
+    [ -n "${CASTDIR:-}" ] && rm -rf "$CASTDIR"
+    exit 0
 fi
 
 # ---- Tag + GitHub release -------------------------------------------------------
