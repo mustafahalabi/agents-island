@@ -81,12 +81,19 @@ cat <<EOF
                                                  # Apple ID password.
 EOF
 
-say "5. TAP_TOKEN"
+say "5. TAP_DEPLOY_KEY"
 cat <<EOF
-  A fine-grained PAT with Contents: read and write on
-  mustafahalabi/homebrew-tap — GITHUB_TOKEN cannot push to another repository,
-  so without this the release ships and the cask stays behind.
-      gh secret set TAP_TOKEN --repo $REPO
+  GITHUB_TOKEN cannot push to another repository, so the cask bump needs its own
+  credential — otherwise the release ships and the cask stays behind. A deploy
+  key grants write to homebrew-tap and nothing else, unlike a PAT, and needs no
+  Keychain access to mint:
+      ssh-keygen -t ed25519 -N '' -C 'agents-island release workflow' -f tap_key
+      gh api -X POST repos/mustafahalabi/homebrew-tap/keys \\
+          -f title='agents-island release workflow' \\
+          -f key="\$(cat tap_key.pub)" -F read_only=false
+      gh secret set TAP_DEPLOY_KEY --repo $REPO < tap_key
+      rm tap_key tap_key.pub
+  Already registered ones: gh api repos/mustafahalabi/homebrew-tap/keys
 EOF
 
 say "Check what is set:  gh secret list --repo $REPO"

@@ -158,7 +158,7 @@ why releases never run on `pull_request`.
 | `APPLE_TEAM_ID` | Developer Team ID |
 | `APPLE_APP_PASSWORD` | App-specific password from account.apple.com |
 | `SPARKLE_PRIVATE_KEY` | The private EdDSA key that signs the appcast |
-| `TAP_TOKEN` | A token with `contents: write` on `mustafahalabi/homebrew-tap` |
+| `TAP_DEPLOY_KEY` | Private half of a write-enabled deploy key on `mustafahalabi/homebrew-tap` |
 
 `scripts/export-release-secrets.sh` prints each value from the local Keychain,
 ready to paste. The Sparkle private key in particular is not recoverable if

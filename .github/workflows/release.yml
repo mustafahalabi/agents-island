@@ -146,12 +146,27 @@ jobs:
           chmod 600 "$KEYFILE"
           echo "SPARKLE_ED_KEY_FILE=$KEYFILE" >> "$GITHUB_ENV"
 
+      # GITHUB_TOKEN cannot push to another repository, so the cask bump needs
+      # its own credential. A deploy key is the narrow choice: it grants write
+      # to homebrew-tap and to nothing else, where a personal access token would
+      # carry whatever else its owner can reach.
+      - name: Authorize the Homebrew tap push
+        env:
+          TAP_DEPLOY_KEY: ${{ secrets.TAP_DEPLOY_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$TAP_DEPLOY_KEY" > "$HOME/.ssh/tap_key"
+          chmod 600 "$HOME/.ssh/tap_key"
+          ssh-keyscan github.com >> "$HOME/.ssh/known_hosts" 2>/dev/null
+          # IdentitiesOnly stops ssh from offering any other key first and
+          # getting rejected before it reaches this one.
+          echo "GIT_SSH_COMMAND=ssh -i $HOME/.ssh/tap_key -o IdentitiesOnly=yes" >> "$GITHUB_ENV"
+
       - name: Cut the release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # GITHUB_TOKEN cannot push to another repository, so the tap bump
-          # needs its own token with contents:write on homebrew-tap.
-          TAP_REMOTE: https://x-access-token:${{ secrets.TAP_TOKEN }}@github.com/mustafahalabi/homebrew-tap.git
+          TAP_REMOTE: git@github.com:mustafahalabi/homebrew-tap.git
         run: |
           set -euo pipefail
           git config --global user.name "github-actions[bot]"
