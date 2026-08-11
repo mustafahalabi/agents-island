@@ -40,7 +40,9 @@ enum AgentKind: String, CaseIterable {
         .cursorAgent: Meta(displayName: "Cursor",   rgb: (0.62, 0.62, 0.68), symbol: "cursorarrow",     iconFile: "cursor",        aliases: ["cursor"]),
         .copilot:     Meta(displayName: "Copilot",  rgb: (0.45, 0.49, 0.55), symbol: "eyeglasses",      iconFile: "githubcopilot", aliases: []),
         .qwen:        Meta(displayName: "Qwen",     rgb: (0.38, 0.36, 0.93), symbol: "diamond.fill",    iconFile: "qwen",     aliases: ["qwen-code"]),
-        .kimi:        Meta(displayName: "Kimi",     rgb: (0.12, 0.12, 0.15), symbol: "moon.stars.fill", iconFile: "kimi",     aliases: ["kimi-code"]),
+        // Runtime process title is "kimi-co" (Kimi Code rewrites argv[0] away
+        // from the binary basename "kimi"); "kimi-code" is the historical alias.
+        .kimi:        Meta(displayName: "Kimi",     rgb: (0.12, 0.12, 0.15), symbol: "moon.stars.fill", iconFile: "kimi",     aliases: ["kimi-code", "kimi-co"]),
         .deepseek:    Meta(displayName: "DeepSeek", rgb: (0.30, 0.42, 1.00), symbol: "magnifyingglass", iconFile: "deepseek", aliases: ["deepcode"]),
         .grok:        Meta(displayName: "Grok",     rgb: (0.12, 0.12, 0.14), symbol: "circle.slash",    iconFile: "grok",     aliases: ["grok-cli"]),
         .mistral:     Meta(displayName: "Mistral",  rgb: (0.98, 0.32, 0.06), symbol: "wind",            iconFile: "mistral",  aliases: ["vibe", "mistral-vibe"]),

@@ -25,6 +25,7 @@ struct AgentDetectionTests {
         expect("cursor-agent", .cursorAgent)
         expect("qwen", .qwen); expect("qwen-code", .qwen)
         expect("kimi", .kimi); expect("kimi-code", .kimi)
+        expect("kimi-co", .kimi)  // live process title (argv[0] rewrite)
         expect("deepcode", .deepseek)          // real command name
         expect("grok", .grok); expect("grok-cli", .grok)
         expect("vibe", .mistral)               // Mistral's command is `vibe`
