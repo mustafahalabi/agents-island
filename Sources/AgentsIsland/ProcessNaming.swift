@@ -80,4 +80,17 @@ enum ProcessNaming {
         guard tty == nil, let parentCommand else { return false }
         return parentCommand.contains(".app/")
     }
+
+    /// Claude Code driven by its editor extension (VS Code, Cursor, Windsurf…).
+    ///
+    /// The extension runs its bundled native binary from
+    /// `~/.vscode/extensions/anthropic.claude-code-<ver>-<platform>/…` with no
+    /// tty, in `--output-format stream-json`, as a child of the editor's
+    /// extension host. That trips both the headless filter and `isGUIHelper`,
+    /// so every extension chat was hidden — yet it is an interactive session
+    /// the user opened and is watching, and it writes the same session
+    /// registry and transcripts as the CLI.
+    static func isEditorExtensionAgent(args: String) -> Bool {
+        args.contains("/extensions/anthropic.claude-code")
+    }
 }
