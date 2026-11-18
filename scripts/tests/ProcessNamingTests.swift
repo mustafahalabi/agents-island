@@ -109,6 +109,23 @@ struct ProcessNamingTests {
             fail("unknown parent should not be treated as a GUI helper")
         }
 
+        // Editor-extension Claude sessions: real, despite no tty + stream-json.
+        let vscodeExt = "/Users/me/.vscode/extensions/anthropic.claude-code-2.1.326-darwin-arm64/resources/native-binary/claude --output-format stream-json --verbose --input-format stream-json"
+        let cursorExt = "/Users/me/.cursor/extensions/anthropic.claude-code-2.1.326-darwin-arm64/resources/native-binary/claude --output-format stream-json"
+        if !ProcessNaming.isEditorExtensionAgent(args: vscodeExt) {
+            fail("VS Code extension Claude session not recognized")
+        }
+        if !ProcessNaming.isEditorExtensionAgent(args: cursorExt) {
+            fail("Cursor extension Claude session not recognized")
+        }
+        // SDK / orchestrator runs stay headless.
+        if ProcessNaming.isEditorExtensionAgent(args: "/Users/me/.local/bin/claude -p --output-format stream-json") {
+            fail("a plain headless claude run was treated as an editor extension")
+        }
+        if ProcessNaming.isEditorExtensionAgent(args: "claude") {
+            fail("a terminal claude was treated as an editor extension")
+        }
+
         if failures == 0 {
             print("✅ ProcessNamingTests: all passed (app paths resolve, GUI helpers excluded)")
         } else {

@@ -146,7 +146,9 @@ final class AgentMonitor: ObservableObject {
             agentKindByPid[$0.ppid] != $0.kind
             // …and GUI background helpers, which Electron names after the app
             // itself so they match an agent alias. See ProcessNaming.
-            && !ProcessNaming.isGUIHelper(tty: $0.tty, parentCommand: procs[$0.ppid]?.command)
+            // Editor-extension sessions look like both, but are real ones.
+            && (ProcessNaming.isEditorExtensionAgent(args: $0.args)
+                || !ProcessNaming.isGUIHelper(tty: $0.tty, parentCommand: procs[$0.ppid]?.command))
         }
 
         // Retire pid → rollout mappings for codex processes that have exited.
@@ -193,7 +195,7 @@ final class AgentMonitor: ObservableObject {
                 session.pendingQuestion = info.question
                 // Task store is the current system; TodoWrite in the
                 // transcript is the legacy fallback.
-                let storeTasks = ClaudeSessions.tasks(sessionId: meta.sessionId)
+                let storeTasks = ClaudeSessions.tasks(sessionId: meta.sessionId, root: meta.root)
                 session.todos = storeTasks.isEmpty ? info.todos : storeTasks
 
                 let idleAge = meta.statusUpdatedAt.map {
@@ -316,6 +318,7 @@ final class AgentMonitor: ObservableObject {
     /// keeps them visible.
     private static func isHeadless(tty: String?, args: String) -> Bool {
         guard tty == nil else { return false }
+        if ProcessNaming.isEditorExtensionAgent(args: args) { return false }
         if args.contains("stream-json") || args.contains("--print") { return true }
         return args.split(separator: " ").contains("-p")
     }

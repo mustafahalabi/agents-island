@@ -2,6 +2,7 @@ import Foundation
 
 /// Reads Claude Code's live session registry (~/.claude/sessions/<pid>.json)
 /// and session transcripts (~/.claude/projects/<encoded-cwd>/<sessionId>.jsonl)
+/// — plus the same layout under each ~/.claude-profiles/<name>/ —
 /// to enrich Claude agents with titles, prompts, activity, and real status.
 enum ClaudeSessions {
 
@@ -12,6 +13,8 @@ enum ClaudeSessions {
         let name: String?
         let status: String?         // "busy" | "idle"
         let statusUpdatedAt: Double? // epoch ms
+        /// Config directory the session was found in (`~/.claude` or a profile).
+        var root: String = ClaudeSessions.home + "/.claude"
     }
 
     struct TranscriptInfo: Equatable {
@@ -26,38 +29,60 @@ enum ClaudeSessions {
         var question: PendingQuestion?  // pending AskUserQuestion, if any
     }
 
-    private static let home = FileManager.default.homeDirectoryForCurrentUser.path
+    fileprivate static let home = FileManager.default.homeDirectoryForCurrentUser.path
 
     // MARK: - Session registry
 
-    /// All live sessions keyed by pid. Files for dead pids may linger; the
-    /// caller cross-checks against the process table.
-    static func sessionsByPid() -> [Int32: Meta] {
-        let dir = home + "/.claude/sessions"
-        guard let files = try? FileManager.default.contentsOfDirectory(atPath: dir) else { return [:] }
+    /// Every Claude config directory that may hold live sessions.
+    ///
+    /// `~/.claude` is the default, but `CLAUDE_CONFIG_DIR` moves everything —
+    /// sessions, projects, tasks — elsewhere. Account switchers use it to keep
+    /// one directory per account under `~/.claude-profiles/<name>/`, and a GUI
+    /// app never sees the variable, so those sessions were invisible. Each
+    /// profile with a `sessions/` dir is scanned; `_`-prefixed entries are the
+    /// switchers' own bookkeeping (backups, shims), not profiles.
+    static func configRoots(home: String = home) -> [String] {
+        var roots = [home + "/.claude"]
+        let profiles = home + "/.claude-profiles"
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: profiles)) ?? []
+        for name in names.sorted() where !name.hasPrefix(".") && !name.hasPrefix("_") {
+            let dir = profiles + "/" + name
+            if FileManager.default.fileExists(atPath: dir + "/sessions") { roots.append(dir) }
+        }
+        return roots
+    }
 
+    /// All live sessions keyed by pid, across every config root. Files for
+    /// dead pids may linger; the caller cross-checks against the process table.
+    static func sessionsByPid() -> [Int32: Meta] {
         var result: [Int32: Meta] = [:]
-        for file in files where file.hasSuffix(".json") {
-            guard let data = FileManager.default.contents(atPath: dir + "/" + file),
-                  let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
-                  let pid = (obj["pid"] as? NSNumber)?.int32Value,
-                  let sessionId = obj["sessionId"] as? String,
-                  let cwd = obj["cwd"] as? String
-            else { continue }
-            result[pid] = Meta(
-                pid: pid,
-                sessionId: sessionId,
-                cwd: cwd,
-                name: obj["name"] as? String,
-                status: obj["status"] as? String,
-                statusUpdatedAt: (obj["statusUpdatedAt"] as? NSNumber)?.doubleValue
-            )
+        for root in configRoots() {
+            let dir = root + "/sessions"
+            guard let files = try? FileManager.default.contentsOfDirectory(atPath: dir) else { continue }
+
+            for file in files where file.hasSuffix(".json") {
+                guard let data = FileManager.default.contents(atPath: dir + "/" + file),
+                      let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+                      let pid = (obj["pid"] as? NSNumber)?.int32Value,
+                      let sessionId = obj["sessionId"] as? String,
+                      let cwd = obj["cwd"] as? String
+                else { continue }
+                result[pid] = Meta(
+                    pid: pid,
+                    sessionId: sessionId,
+                    cwd: cwd,
+                    name: obj["name"] as? String,
+                    status: obj["status"] as? String,
+                    statusUpdatedAt: (obj["statusUpdatedAt"] as? NSNumber)?.doubleValue,
+                    root: root
+                )
+            }
         }
         return result
     }
 
     static func transcriptPath(for meta: Meta) -> String {
-        home + "/.claude/projects/\(projectDirName(for: meta.cwd))/\(meta.sessionId).jsonl"
+        meta.root + "/projects/\(projectDirName(for: meta.cwd))/\(meta.sessionId).jsonl"
     }
 
     /// Claude Code's own encoding of a project path into a directory name.
@@ -93,8 +118,8 @@ enum ClaudeSessions {
 
     /// The current task system. Each task is one JSON file:
     /// { id, subject, status: pending|in_progress|completed, ... }
-    static func tasks(sessionId: String) -> [Todo] {
-        let dir = home + "/.claude/tasks/" + sessionId
+    static func tasks(sessionId: String, root: String = home + "/.claude") -> [Todo] {
+        let dir = root + "/tasks/" + sessionId
         guard let files = try? FileManager.default.contentsOfDirectory(atPath: dir) else { return [] }
 
         var items: [(order: Int, todo: Todo)] = []

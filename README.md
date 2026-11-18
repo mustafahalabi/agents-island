@@ -115,6 +115,7 @@ Everything is local. The key insight is that coding agents already publish their
 | `~/.claude/sessions/` | pid → session, cwd, **busy/idle status** |
 | `~/.claude/projects/**/*.jsonl` | titles, prompts, live tool activity, subagents, plans, models, token usage |
 | `~/.claude/tasks/` | task checklists |
+| `~/.claude-profiles/<name>/` | the same Claude layout for sessions run under `CLAUDE_CONFIG_DIR` profiles (account switchers) |
 | `~/.codex/sessions/**/rollout-*.jsonl` | Codex status (task events), activity, plans, model |
 | `~/.gemini/tmp/<hash>/` | Gemini prompts and saved chats |
 | `~/.grok/sessions/**/` | Grok status (turn events), activity, todos, title, model, chats |

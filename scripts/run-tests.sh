@@ -47,6 +47,12 @@ run "ProjectPathTests" "$TMP/projpath" \
     Sources/AgentsIsland/ClaudeSessions.swift \
     scripts/tests/ProjectPathTests.swift
 
+run "ConfigRootsTests" "$TMP/configroots" \
+    Sources/AgentsIsland/Agent.swift \
+    Sources/AgentsIsland/TailRead.swift \
+    Sources/AgentsIsland/ClaudeSessions.swift \
+    scripts/tests/ConfigRootsTests.swift
+
 run "LastPromptTests" "$TMP/lastprompt" \
     Sources/AgentsIsland/Agent.swift \
     Sources/AgentsIsland/TailRead.swift \
